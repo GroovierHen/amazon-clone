@@ -29,3 +29,6 @@ next-env.d.ts
 
 # Amazon reference screenshots, never committed or deployed
 reference/
+
+# UX check screenshots
+/.screenshots/

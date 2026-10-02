@@ -21,9 +21,9 @@ export const seedCategories: SeedCategory[] = [
   { slug: "fashion", name: "Fashion" },
   { slug: "kitchen", name: "Kitchen" },
   { slug: "groceries", name: "Groceries" },
-  { slug: "sports-outdoors", name: "Sports & Outdoors" },
+  { slug: "sports-outdoors", name: "Sports and Outdoors" },
   { slug: "beauty", name: "Beauty" },
-  { slug: "home-furniture", name: "Home & Furniture" },
+  { slug: "home-furniture", name: "Home and Furniture" },
   { slug: "automotive", name: "Automotive" },
 ];
 

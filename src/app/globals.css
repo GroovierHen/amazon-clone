@@ -1,26 +1,78 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+ * Stockroom's look. One typeface, Archivo, used at three widths: wide for the
+ * wordmark and headings, normal for reading, narrow for prices and counts, the
+ * way a shelf-edge label sets its numbers.
+ */
+@theme {
+  --color-ink: #17201c;
+  --color-muted: #55635c;
+  --color-paper: #ffffff;
+  --color-shelf: #eef2ef;
+  --color-line: #d3dbd6;
+  --color-pine: #0e5a43;
+  --color-pine-deep: #093b2c;
+  --color-tag: #ffd84d;
+  --color-alert: #a5231c;
+
+  --font-sans: var(--font-archivo), "Helvetica Neue", Arial, sans-serif;
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+@utility type-wide {
+  font-stretch: 118%;
+  letter-spacing: -0.01em;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+@utility type-narrow {
+  font-stretch: 78%;
+  font-variant-numeric: tabular-nums;
+}
+
+@utility container-page {
+  width: 100%;
+  max-width: 80rem;
+  margin-inline: auto;
+  padding-inline: 1rem;
+
+  @media (width >= 48rem) {
+    padding-inline: 2rem;
   }
 }
 
+/* Rows of links that scroll sideways on narrow screens instead of wrapping. */
+@utility scroll-row {
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+:root {
+  color-scheme: light;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  background: var(--color-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* One focus style everywhere, so keyboard users always see where they are. */
+:focus-visible {
+  outline: 3px solid var(--color-pine);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
 }
