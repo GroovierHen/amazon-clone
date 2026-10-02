@@ -167,3 +167,24 @@ To confirm this session yourself, open the second log after this reply. It shoul
 - The first pipe-test of the script failed with a JSON error. The cause was the test, not the
   script: zsh's `echo` turned the `\n` in the test payload into a real newline. Sending the
   payload with `printf '%s'` fixed the test.
+
+## Addendum, later the same day: two capture faults found and fixed
+
+Found while checking the log during the build, in session `dc5b95df`.
+
+- **Messages sent while a turn was running were not logged.** Claude Code records those as
+  queued commands in the transcript, not as user messages, and the script only read user
+  messages. Two prompts were missing ("also if you got time can you change the name of the
+  repo…" and "also in sub agent can you setup my vercel project…").
+- **A sub-agent's report was logged as a prompt.** The report is delivered through the same
+  `UserPromptSubmit` event as a typed prompt, so the hook recorded it as PROMPT 8.
+
+The script now reads queued commands whose origin is the human, and ignores anything that
+starts with `<agent-message` or `<task-notification>`. Because the log is rebuilt from the
+transcript on every hook event, the two missing prompts appear and the sub-agent report
+disappears the next time a hook fires. Commits made before the fix (`f3d62f4` through
+`e2d191e`) contain the faulty version of that log file, so its history shows the entry
+changing. Nothing was edited by hand.
+
+A message sent mid-turn is logged as its own PROMPT. The turn's final response is logged
+once, under the last prompt of that turn.

@@ -14,6 +14,10 @@ One addition to "prompt and final response": when the agent stops to ask the
 user a question through Claude Code's question prompt, the text and question the
 user saw are logged as a RESPONSE and the user's answer as the next PROMPT.
 Otherwise those decisions would be missing from the record.
+
+A message the user sends while a turn is still running is logged as its own
+PROMPT. The turn's final response is logged once, under the last prompt of that
+turn. Reports from sub-agents are not prompts and are not logged.
 """
 import glob
 import json
@@ -36,6 +40,7 @@ NON_PROMPT_PREFIXES = (
     "<bash-stderr>",
     "<task-notification>",
     "<system-reminder>",
+    "<agent-message",
 )
 
 
@@ -146,6 +151,28 @@ def build_exchanges(rows):
                     entry = {"text": block["text"].strip(), "ts": row.get("timestamp")}
                     texts_since_tool.append(entry)
                     last_text = entry
+        elif kind == "attachment" and not row.get("isSidechain"):
+            # A message the user typed while a turn was running. Claude Code hands it
+            # to the model mid-turn and records it as a queued command, not a user row.
+            queued = row.get("attachment") or {}
+            origin = queued.get("origin") or {}
+            text = queued.get("prompt")
+            if queued.get("type") != "queued_command" or origin.get("kind") != "human":
+                continue
+            if queued.get("isMeta") or not isinstance(text, str) or not text.strip():
+                continue
+            if text.lstrip().startswith(NON_PROMPT_PREFIXES):
+                continue
+            # The turn carries on, so the earlier prompt gets no response of its own:
+            # the turn's final response is logged once, under its last prompt.
+            current = {
+                "prompt": text.strip("\n"),
+                "prompt_ts": queued.get("timestamp") or row.get("timestamp"),
+                "model": last_model,
+            }
+            exchanges.append(current)
+            texts_since_tool = []
+            last_text = None
         elif kind == "user" and not row.get("isSidechain"):
             content = (row.get("message") or {}).get("content")
             if content is None:
@@ -273,7 +300,9 @@ def main():
         seen = squash(exchanges[-1]["prompt"]) if exchanges else ""
         fresh = squash(prompt)
         already = bool(seen) and not exchanges[-1].get("response") and (fresh in seen or seen in fresh)
-        if fresh and not already:
+        # Sub-agent reports and task notifications also arrive through this event. They are not prompts.
+        from_user = not prompt.lstrip().startswith(NON_PROMPT_PREFIXES)
+        if fresh and from_user and not already:
             exchanges.append({
                 "prompt": prompt.strip("\n"),
                 "prompt_ts": now_utc(),
