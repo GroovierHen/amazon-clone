@@ -3,7 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
-import { getPool } from "@/db/client";
+import { getDb } from "@/db/drizzle";
 import { formatDate, formatPrice } from "@/lib/format";
 import { getOrder } from "@/lib/orders";
 import { getVisitorId } from "@/lib/visitor";
@@ -28,7 +28,7 @@ export default function OrderPage(props: Props) {
 
 async function OrderDetails({ params, searchParams }: Props) {
   const [{ id }, query, visitorId] = await Promise.all([params, searchParams, getVisitorId()]);
-  const order = visitorId && /^\d{1,15}$/.test(id) ? await getOrder(getPool(), visitorId, Number(id)) : null;
+  const order = visitorId && /^\d{1,15}$/.test(id) ? await getOrder(getDb(), visitorId, Number(id)) : null;
   if (!order) notFound();
 
   return (

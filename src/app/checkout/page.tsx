@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { Suspense } from "react";
 import { EmptyCart } from "@/components/cart-view";
 import { CheckoutForm } from "@/components/checkout-form";
-import { getPool } from "@/db/client";
+import { getDb } from "@/db/drizzle";
 import { getCart } from "@/lib/cart";
 import { getVisitorId } from "@/lib/visitor";
 
@@ -24,7 +24,7 @@ export default function CheckoutPage() {
 
 async function CheckoutContents() {
   const visitorId = await getVisitorId();
-  const cart = visitorId ? await getCart(getPool(), visitorId) : null;
+  const cart = visitorId ? await getCart(getDb(), visitorId) : null;
   if (!cart || cart.lines.length === 0) return <EmptyCart />;
   return <CheckoutForm lines={cart.lines} />;
 }

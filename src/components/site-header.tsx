@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { Suspense } from "react";
-import { getPool } from "@/db/client";
+import { getDb } from "@/db/drizzle";
 import { getCartCount } from "@/lib/cart";
 import { getCategories } from "@/lib/catalog";
 import { searchHref } from "@/lib/format";
@@ -44,7 +44,7 @@ async function CartCount() {
   let count = 0;
   if (visitorId) {
     try {
-      count = await getCartCount(getPool(), visitorId);
+      count = await getCartCount(getDb(), visitorId);
     } catch (error) {
       // A missing number in the header is better than losing the whole page.
       console.error("Cart count failed", error);

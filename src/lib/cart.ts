@@ -1,4 +1,7 @@
-import type { Pool } from "pg";
+import { and, eq, inArray, sql } from "drizzle-orm";
+import type { Db } from "@/db/drizzle";
+import { cartItems, carts, products } from "@/db/schema";
+import { MAX_LINE_QUANTITY, summarize, type Cart } from "./cart-lines";
 
 /**
  * Cart reads and writes. A cart belongs to a visitor id from a cookie, not an
@@ -6,128 +9,93 @@ import type { Pool } from "pg";
  * placed (SPEC.md 6.4). Nothing here is cached (SPEC.md 6.5).
  */
 
-/** Upper bound on one line, so a cart cannot hold absurd numbers. */
-export const MAX_LINE_QUANTITY = 99;
-
-export type CartLine = {
-  productId: number;
-  slug: string;
-  title: string;
-  imageUrl: string | null;
-  /** The product's price right now. It is fixed only when the order is placed. */
-  priceCents: number;
-  stock: number;
-  quantity: number;
-};
-
-export type Cart = {
-  lines: CartLine[];
-  count: number;
-  subtotalCents: number;
-};
-
-export function summarize(lines: CartLine[]): Cart {
-  return {
-    lines,
-    count: lines.reduce((sum, line) => sum + line.quantity, 0),
-    subtotalCents: lines.reduce((sum, line) => sum + line.quantity * line.priceCents, 0),
-  };
-}
-
 const isQuantity = (n: number) => Number.isSafeInteger(n) && n >= 1;
 const isId = (n: number) => Number.isSafeInteger(n) && n >= 1;
 
-export async function getCart(pool: Pool, visitorId: string): Promise<Cart> {
-  const { rows } = await pool.query<{
-    product_id: number;
-    slug: string;
-    title: string;
-    image_url: string | null;
-    price_cents: number;
-    stock: number;
-    quantity: number;
-  }>(
-    `SELECT p.id AS product_id, p.slug, p.title, p.image_urls[1] AS image_url,
-            p.price_cents, p.stock, ci.quantity
-     FROM carts c
-     JOIN cart_items ci ON ci.cart_id = c.id
-     JOIN products p ON p.id = ci.product_id
-     WHERE c.visitor_id = $1
-     ORDER BY ci.added_at, p.id`,
-    [visitorId],
-  );
-  return summarize(
-    rows.map((r) => ({
-      productId: r.product_id,
-      slug: r.slug,
-      title: r.title,
-      imageUrl: r.image_url,
-      priceCents: r.price_cents,
-      stock: r.stock,
-      quantity: r.quantity,
-    })),
-  );
+export async function getCart(db: Db, visitorId: string): Promise<Cart> {
+  const lines = await db
+    .select({
+      productId: products.id,
+      slug: products.slug,
+      title: products.title,
+      imageUrl: sql<string | null>`${products.imageUrls}[1]`,
+      priceCents: products.priceCents,
+      stock: products.stock,
+      quantity: cartItems.quantity,
+    })
+    .from(carts)
+    .innerJoin(cartItems, eq(cartItems.cartId, carts.id))
+    .innerJoin(products, eq(products.id, cartItems.productId))
+    .where(eq(carts.visitorId, visitorId))
+    .orderBy(cartItems.addedAt, products.id);
+  return summarize(lines);
 }
 
-export async function getCartCount(pool: Pool, visitorId: string): Promise<number> {
-  const { rows } = await pool.query<{ count: number }>(
-    `SELECT coalesce(sum(ci.quantity), 0)::int AS count
-     FROM carts c JOIN cart_items ci ON ci.cart_id = c.id
-     WHERE c.visitor_id = $1`,
-    [visitorId],
-  );
-  return rows[0].count;
+export async function getCartCount(db: Db, visitorId: string): Promise<number> {
+  const [row] = await db
+    .select({ count: sql<number>`coalesce(sum(${cartItems.quantity}), 0)::int` })
+    .from(carts)
+    .innerJoin(cartItems, eq(cartItems.cartId, carts.id))
+    .where(eq(carts.visitorId, visitorId));
+  return row.count;
 }
 
 /**
- * Adds to a line, creating the cart and the line as needed.
+ * Adds to a line, creating the cart and the line as needed, in one statement.
  * Returns false when the product does not exist or the input is not valid.
  */
-export async function addToCart(pool: Pool, visitorId: string, productId: number, quantity = 1): Promise<boolean> {
+export async function addToCart(db: Db, visitorId: string, productId: number, quantity = 1): Promise<boolean> {
   if (!isId(productId) || !isQuantity(quantity)) return false;
-  const { rowCount } = await pool.query(
-    `WITH cart AS (
-       INSERT INTO carts (visitor_id) VALUES ($1)
-       ON CONFLICT (visitor_id) DO UPDATE SET updated_at = now()
-       RETURNING id
-     )
-     INSERT INTO cart_items (cart_id, product_id, quantity)
-     SELECT cart.id, p.id, LEAST($3::int, $4::int)
-     FROM cart, products p
-     WHERE p.id = $2
-     ON CONFLICT (cart_id, product_id)
-     DO UPDATE SET quantity = LEAST(cart_items.quantity + EXCLUDED.quantity, $4::int)`,
-    [visitorId, productId, quantity, MAX_LINE_QUANTITY],
+  const cart = db.$with("cart").as(
+    db
+      .insert(carts)
+      .values({ visitorId })
+      .onConflictDoUpdate({ target: carts.visitorId, set: { updatedAt: sql`now()` } })
+      .returning({ id: carts.id }),
   );
-  return (rowCount ?? 0) > 0;
+  // Selecting from products means a product that does not exist adds no row.
+  const result = await db
+    .with(cart)
+    .insert(cartItems)
+    .select(
+      db
+        .select({
+          cartId: cart.id,
+          productId: products.id,
+          quantity: sql<number>`${Math.min(quantity, MAX_LINE_QUANTITY)}::int`.as("quantity"),
+          addedAt: sql<Date>`now()`.as("added_at"),
+        })
+        .from(cart)
+        .crossJoin(products)
+        .where(eq(products.id, productId)),
+    )
+    .onConflictDoUpdate({
+      target: [cartItems.cartId, cartItems.productId],
+      set: { quantity: sql`least(${cartItems.quantity} + excluded.quantity, ${MAX_LINE_QUANTITY}::int)` },
+    });
+  return (result.rowCount ?? 0) > 0;
 }
 
 /** Sets a line to an exact quantity. Zero or less removes the line. */
-export async function setCartQuantity(
-  pool: Pool,
-  visitorId: string,
-  productId: number,
-  quantity: number,
-): Promise<boolean> {
+export async function setCartQuantity(db: Db, visitorId: string, productId: number, quantity: number): Promise<boolean> {
   if (!isId(productId) || !Number.isSafeInteger(quantity)) return false;
-  if (quantity <= 0) return removeFromCart(pool, visitorId, productId);
-  const { rowCount } = await pool.query(
-    `UPDATE cart_items ci
-     SET quantity = LEAST($3::int, $4::int)
-     FROM carts c
-     WHERE c.id = ci.cart_id AND c.visitor_id = $1 AND ci.product_id = $2`,
-    [visitorId, productId, quantity, MAX_LINE_QUANTITY],
-  );
-  return (rowCount ?? 0) > 0;
+  if (quantity <= 0) return removeFromCart(db, visitorId, productId);
+  const result = await db
+    .update(cartItems)
+    .set({ quantity: Math.min(quantity, MAX_LINE_QUANTITY) })
+    .where(and(eq(cartItems.productId, productId), inArray(cartItems.cartId, cartOf(db, visitorId))));
+  return (result.rowCount ?? 0) > 0;
 }
 
-export async function removeFromCart(pool: Pool, visitorId: string, productId: number): Promise<boolean> {
+export async function removeFromCart(db: Db, visitorId: string, productId: number): Promise<boolean> {
   if (!isId(productId)) return false;
-  const { rowCount } = await pool.query(
-    `DELETE FROM cart_items ci
-     USING carts c
-     WHERE c.id = ci.cart_id AND c.visitor_id = $1 AND ci.product_id = $2`,
-    [visitorId, productId],
-  );
-  return (rowCount ?? 0) > 0;
+  const result = await db
+    .delete(cartItems)
+    .where(and(eq(cartItems.productId, productId), inArray(cartItems.cartId, cartOf(db, visitorId))));
+  return (result.rowCount ?? 0) > 0;
+}
+
+/** Subquery for the visitor's cart id, so a write can only reach their own lines. */
+function cartOf(db: Db, visitorId: string) {
+  return db.select({ id: carts.id }).from(carts).where(eq(carts.visitorId, visitorId));
 }

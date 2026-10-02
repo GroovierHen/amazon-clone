@@ -2,7 +2,7 @@
 
 import { refresh, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
-import { getPool } from "@/db/client";
+import { getDb } from "@/db/drizzle";
 import { placeOrder } from "@/lib/orders";
 import { getVisitorId } from "@/lib/visitor";
 
@@ -39,7 +39,7 @@ export async function placeOrderAction(_previous: CheckoutState, formData: FormD
 
   let result;
   try {
-    result = await placeOrder(getPool(), visitorId, {
+    result = await placeOrder(getDb(), visitorId, {
       name: values.name,
       address: `${values.street}\n${values.city} ${values.postcode}`,
     });

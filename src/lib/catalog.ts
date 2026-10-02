@@ -1,5 +1,5 @@
 import { cacheLife, cacheTag } from "next/cache";
-import { getPool } from "@/db/client";
+import { getDb } from "@/db/drizzle";
 import {
   findProductBySlug,
   findProductOffer,
@@ -22,7 +22,7 @@ import {
 export async function getProductList(params: ListParams): Promise<ListResult> {
   "use cache";
   cacheLife("minutes");
-  const result = await listProducts(getPool(), params);
+  const result = await listProducts(getDb(), params);
   cacheTag("products", ...result.items.map((item) => `product:${item.id}`));
   return result;
 }
@@ -32,7 +32,7 @@ export async function getCategories(): Promise<CategorySummary[]> {
   "use cache";
   cacheLife("days");
   cacheTag("products");
-  return listCategories(getPool());
+  return listCategories(getDb());
 }
 
 /**
@@ -43,7 +43,7 @@ export async function getCategories(): Promise<CategorySummary[]> {
 export async function getProductContent(slug: string): Promise<ProductContent | null> {
   "use cache";
   cacheLife("days");
-  const product = await findProductBySlug(getPool(), slug);
+  const product = await findProductBySlug(getDb(), slug);
   cacheTag(product ? `product:${product.id}` : "products");
   return product;
 }
@@ -53,12 +53,12 @@ export async function getProductOffer(id: number): Promise<ProductOffer | null> 
   "use cache";
   cacheLife("minutes");
   cacheTag(`product:${id}`);
-  return findProductOffer(getPool(), id);
+  return findProductOffer(getDb(), id);
 }
 
 export async function getProductSlugs(): Promise<string[]> {
   "use cache";
   cacheLife("days");
   cacheTag("products");
-  return listProductSlugs(getPool());
+  return listProductSlugs(getDb());
 }

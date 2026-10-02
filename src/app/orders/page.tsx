@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Suspense } from "react";
-import { getPool } from "@/db/client";
+import { getDb } from "@/db/drizzle";
 import { formatDate, formatPrice } from "@/lib/format";
 import { listOrders } from "@/lib/orders";
 import { getVisitorId } from "@/lib/visitor";
@@ -29,7 +29,7 @@ const one = (value: string | string[] | undefined) => (Array.isArray(value) ? va
 async function OrderList({ searchParams }: { searchParams: SearchParams }) {
   const [visitorId, raw] = await Promise.all([getVisitorId(), searchParams]);
   const list = visitorId
-    ? await listOrders(getPool(), visitorId, { after: one(raw.after), before: one(raw.before) })
+    ? await listOrders(getDb(), visitorId, { after: one(raw.after), before: one(raw.before) })
     : null;
 
   if (!list || list.orders.length === 0) {

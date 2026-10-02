@@ -1,4 +1,6 @@
-import type { Pool } from "pg";
+import { and, asc, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import type { Db } from "@/db/drizzle";
+import { categories, products } from "@/db/schema";
 
 /**
  * Product list queries. Every list is keyset paginated (SPEC.md 6.1): the
@@ -52,21 +54,21 @@ export type ListResult = {
 };
 
 type SortSpec = {
-  /** SQL expression for the sort value, over the `matched` CTE. */
-  expr: string;
+  /** Which field of the `matched` rows is the sort value. */
+  field: "rank" | "priceCents" | "ratingAvg" | "createdAt";
   /** Postgres type the cursor's sort value is cast back to. */
-  cast: string;
+  cast: "float4" | "integer" | "numeric" | "timestamptz";
   direction: "ASC" | "DESC";
   /** Shape a cursor's sort value must have before it is sent to Postgres. */
   valid: RegExp;
 };
 
 const SORT_SPECS: Record<SortKey, SortSpec> = {
-  relevance: { expr: "rank", cast: "float4", direction: "DESC", valid: /^-?\d+(\.\d+)?(e-?\d+)?$/ },
-  "price-asc": { expr: "price_cents", cast: "integer", direction: "ASC", valid: /^\d+$/ },
-  "price-desc": { expr: "price_cents", cast: "integer", direction: "DESC", valid: /^\d+$/ },
-  rating: { expr: "rating_avg", cast: "numeric", direction: "DESC", valid: /^\d+(\.\d+)?$/ },
-  newest: { expr: "created_at", cast: "timestamptz", direction: "DESC", valid: /^[\d\-:.+ ]+$/ },
+  relevance: { field: "rank", cast: "float4", direction: "DESC", valid: /^-?\d+(\.\d+)?(e-?\d+)?$/ },
+  "price-asc": { field: "priceCents", cast: "integer", direction: "ASC", valid: /^\d+$/ },
+  "price-desc": { field: "priceCents", cast: "integer", direction: "DESC", valid: /^\d+$/ },
+  rating: { field: "ratingAvg", cast: "numeric", direction: "DESC", valid: /^\d+(\.\d+)?$/ },
+  newest: { field: "createdAt", cast: "timestamptz", direction: "DESC", valid: /^[\d\-:.+ ]+$/ },
 };
 
 /** How close a title has to be to the query for the typo-tolerant fallback. */
@@ -100,59 +102,59 @@ export function resolveSort(sort: string | undefined, hasQuery: boolean): SortKe
   return hasQuery ? "relevance" : "newest";
 }
 
-type Row = {
-  id: number;
-  slug: string;
-  title: string;
-  price_cents: number;
-  stock: number;
-  rating_avg: string;
-  rating_count: number;
-  image_url: string | null;
-  sort_value: string;
-};
-
-export async function listProducts(pool: Pool, params: ListParams): Promise<ListResult> {
+export async function listProducts(db: Db, params: ListParams): Promise<ListResult> {
   const q = normalizeQuery(params.q);
   const sort = resolveSort(params.sort, q !== "");
   const spec = SORT_SPECS[sort];
   const limit = Math.min(Math.max(params.limit ?? PAGE_SIZE, 1), PAGE_SIZE);
 
-  const values: unknown[] = [];
-  const bind = (value: unknown) => `$${values.push(value)}`;
-
   // 1. Which rows match. Full-text search first, trigram similarity on the
   //    title only when full-text search finds nothing at all (SPEC.md 6.2).
   let match: ListResult["match"] = "all";
-  let matched = "SELECT p.*, 0::float4 AS rank FROM products p";
+  let rank: SQL<number> = sql<number>`0::float4`;
+  const conditions: Array<SQL | undefined> = [];
   if (q) {
     // A name that contains the query text also counts as a match, so "phone"
     // finds "iPhone". Those rows rank below the full-text matches.
     const inTitle = `%${q.replace(/[\\%_]/g, "\\$&")}%`;
-    const { rows } = await pool.query<{ found: boolean }>(
-      `SELECT EXISTS (
-         SELECT 1 FROM products
-         WHERE search @@ websearch_to_tsquery('english', $1) OR title ILIKE $2
-       ) AS found`,
-      [q, inTitle],
+    const textMatch = or(
+      sql`${products.search} @@ websearch_to_tsquery('english', ${q})`,
+      ilike(products.title, inTitle),
     );
-    if (rows[0].found) {
+    const found = await db.select({ id: products.id }).from(products).where(textMatch).limit(1);
+    if (found.length > 0) {
       match = "text";
-      const query = bind(q);
-      matched = `SELECT p.*, ts_rank(p.search, websearch_to_tsquery('english', ${query})) AS rank
-                 FROM products p
-                 WHERE (p.search @@ websearch_to_tsquery('english', ${query}) OR p.title ILIKE ${bind(inTitle)})`;
+      rank = sql<number>`ts_rank(${products.search}, websearch_to_tsquery('english', ${q}))`;
+      conditions.push(textMatch);
     } else {
       match = "fuzzy";
-      const query = bind(q);
-      matched = `SELECT p.*, public.word_similarity(${query}, p.title) AS rank
-                 FROM products p
-                 WHERE public.word_similarity(${query}, p.title) >= ${bind(FUZZY_THRESHOLD)}`;
+      rank = sql<number>`public.word_similarity(${q}, ${products.title})`;
+      conditions.push(sql`public.word_similarity(${q}, ${products.title}) >= ${FUZZY_THRESHOLD}`);
     }
   }
   if (params.category) {
-    matched += `${q ? " AND" : " WHERE"} p.category_id = (SELECT id FROM categories WHERE slug = ${bind(params.category)})`;
+    conditions.push(
+      eq(products.categoryId, db.select({ id: categories.id }).from(categories).where(eq(categories.slug, params.category))),
+    );
   }
+
+  const matched = db.$with("matched").as(
+    db
+      .select({
+        id: products.id,
+        slug: products.slug,
+        title: products.title,
+        priceCents: products.priceCents,
+        stock: products.stock,
+        ratingAvg: products.ratingAvg,
+        ratingCount: products.ratingCount,
+        imageUrl: sql<string | null>`${products.imageUrls}[1]`.as("image_url"),
+        createdAt: products.createdAt,
+        rank: rank.as("rank"),
+      })
+      .from(products)
+      .where(and(...conditions)),
+  );
 
   // 2. Which side of the cursor. `before` walks backwards, so both the
   //    comparison and the order flip, and the rows are reversed afterwards.
@@ -160,35 +162,39 @@ export async function listProducts(pool: Pool, params: ListParams): Promise<List
   const before = after ? null : decodeCursor(params.before, spec);
   const cursor = after ?? before;
   const backwards = before !== null;
-  const forwardOp = spec.direction === "ASC" ? ">" : "<";
-  const op = backwards ? (forwardOp === ">" ? "<" : ">") : forwardOp;
-  const order = backwards ? (spec.direction === "ASC" ? "DESC" : "ASC") : spec.direction;
-
-  const countValues = [...values];
-  const where = cursor
-    ? `WHERE (${spec.expr}, id) ${op} (${bind(cursor[0])}::${spec.cast}, ${bind(cursor[1])}::bigint)`
-    : "";
+  const ascending = (spec.direction === "ASC") !== backwards;
+  const direction = ascending ? asc : desc;
+  const sortValue = matched[spec.field];
 
   const [page, count] = await Promise.all([
-    pool.query<Row>(
-      `WITH matched AS (${matched})
-       SELECT id, slug, title, price_cents, stock, rating_avg, rating_count,
-              image_urls[1] AS image_url, (${spec.expr})::text AS sort_value
-       FROM matched
-       ${where}
-       ORDER BY ${spec.expr} ${order}, id ${order}
-       LIMIT ${bind(limit + 1)}`,
-      values,
-    ),
-    pool.query<{ total: number }>(
-      `WITH matched AS (${matched}) SELECT count(*)::int AS total FROM matched`,
-      countValues,
-    ),
+    db
+      .with(matched)
+      .select({
+        id: matched.id,
+        slug: matched.slug,
+        title: matched.title,
+        priceCents: matched.priceCents,
+        stock: matched.stock,
+        ratingAvg: matched.ratingAvg,
+        ratingCount: matched.ratingCount,
+        imageUrl: matched.imageUrl,
+        // Postgres's own text for the sort value, so the cursor compares exactly.
+        sortValue: sql<string>`${sortValue}::text`,
+      })
+      .from(matched)
+      .where(
+        cursor
+          ? sql`(${sortValue}, ${matched.id}) ${ascending ? sql`>` : sql`<`} (${cursor[0]}::${sql.raw(spec.cast)}, ${cursor[1]}::bigint)`
+          : undefined,
+      )
+      .orderBy(direction(sortValue), direction(matched.id))
+      .limit(limit + 1),
+    db.with(matched).select({ total: sql<number>`count(*)::int` }).from(matched),
   ]);
 
   // 3. One extra row was requested to learn whether another page follows.
-  const hasMore = page.rows.length > limit;
-  const rows = page.rows.slice(0, limit);
+  const hasMore = page.length > limit;
+  const rows = page.slice(0, limit);
   if (backwards) rows.reverse();
 
   const first = rows[0];
@@ -201,15 +207,15 @@ export async function listProducts(pool: Pool, params: ListParams): Promise<List
       id: r.id,
       slug: r.slug,
       title: r.title,
-      priceCents: r.price_cents,
+      priceCents: r.priceCents,
       stock: r.stock,
-      ratingAvg: Number(r.rating_avg),
-      ratingCount: r.rating_count,
-      imageUrl: r.image_url,
+      ratingAvg: Number(r.ratingAvg),
+      ratingCount: r.ratingCount,
+      imageUrl: r.imageUrl,
     })),
-    nextCursor: hasNext && last ? encodeCursor(last.sort_value, last.id) : null,
-    prevCursor: hasPrev && first ? encodeCursor(first.sort_value, first.id) : null,
-    total: count.rows[0].total,
+    nextCursor: hasNext && last ? encodeCursor(last.sortValue, last.id) : null,
+    prevCursor: hasPrev && first ? encodeCursor(first.sortValue, first.id) : null,
+    total: count[0].total,
     sort,
     match,
   };
@@ -223,27 +229,28 @@ export type CategorySummary = {
   imageUrl: string | null;
 };
 
-export async function listCategories(pool: Pool): Promise<CategorySummary[]> {
-  const { rows } = await pool.query<{
-    slug: string;
-    name: string;
-    product_count: number;
-    image_url: string | null;
-  }>(
-    `SELECT c.slug, c.name,
-            (SELECT count(*)::int FROM products p WHERE p.category_id = c.id) AS product_count,
-            (SELECT p.image_urls[1] FROM products p
-              WHERE p.category_id = c.id AND p.image_urls[1] LIKE 'http%'
-              ORDER BY p.rating_avg DESC, p.id DESC LIMIT 1) AS image_url
-     FROM categories c
-     ORDER BY product_count DESC, c.name`,
-  );
-  return rows.map((r) => ({
-    slug: r.slug,
-    name: r.name,
-    productCount: r.product_count,
-    imageUrl: r.image_url,
-  }));
+export async function listCategories(db: Db): Promise<CategorySummary[]> {
+  const inCategory = eq(products.categoryId, categories.id);
+  const productCount = sql<number>`${db
+    .select({ n: sql`count(*)::int` })
+    .from(products)
+    .where(inCategory)}`.as("product_count");
+  const bestRatedPhoto = db
+    .select({ url: sql`${products.imageUrls}[1]` })
+    .from(products)
+    .where(and(inCategory, sql`${products.imageUrls}[1] LIKE 'http%'`))
+    .orderBy(desc(products.ratingAvg), desc(products.id))
+    .limit(1);
+
+  return db
+    .select({
+      slug: categories.slug,
+      name: categories.name,
+      productCount,
+      imageUrl: sql<string | null>`${bestRatedPhoto}`,
+    })
+    .from(categories)
+    .orderBy(desc(productCount), categories.name);
 }
 
 /** The slow-changing part of a product: what it is. */
@@ -265,49 +272,35 @@ export type ProductOffer = {
   stock: number;
 };
 
-export async function findProductBySlug(pool: Pool, slug: string): Promise<ProductContent | null> {
-  const { rows } = await pool.query<{
-    id: number;
-    slug: string;
-    title: string;
-    description: string;
-    image_urls: string[];
-    rating_avg: string;
-    rating_count: number;
-    category_slug: string;
-    category_name: string;
-  }>(
-    `SELECT p.id, p.slug, p.title, p.description, p.image_urls, p.rating_avg, p.rating_count,
-            c.slug AS category_slug, c.name AS category_name
-     FROM products p JOIN categories c ON c.id = p.category_id
-     WHERE p.slug = $1`,
-    [slug],
-  );
-  const r = rows[0];
-  if (!r) return null;
-  return {
-    id: r.id,
-    slug: r.slug,
-    title: r.title,
-    description: r.description,
-    imageUrls: r.image_urls,
-    ratingAvg: Number(r.rating_avg),
-    ratingCount: r.rating_count,
-    categorySlug: r.category_slug,
-    categoryName: r.category_name,
-  };
+export async function findProductBySlug(db: Db, slug: string): Promise<ProductContent | null> {
+  const [row] = await db
+    .select({
+      id: products.id,
+      slug: products.slug,
+      title: products.title,
+      description: products.description,
+      imageUrls: products.imageUrls,
+      ratingAvg: products.ratingAvg,
+      ratingCount: products.ratingCount,
+      categorySlug: categories.slug,
+      categoryName: categories.name,
+    })
+    .from(products)
+    .innerJoin(categories, eq(categories.id, products.categoryId))
+    .where(eq(products.slug, slug));
+  return row ? { ...row, ratingAvg: Number(row.ratingAvg) } : null;
 }
 
-export async function findProductOffer(pool: Pool, id: number): Promise<ProductOffer | null> {
-  const { rows } = await pool.query<{ price_cents: number; stock: number }>(
-    "SELECT price_cents, stock FROM products WHERE id = $1",
-    [id],
-  );
-  return rows[0] ? { priceCents: rows[0].price_cents, stock: rows[0].stock } : null;
+export async function findProductOffer(db: Db, id: number): Promise<ProductOffer | null> {
+  const [row] = await db
+    .select({ priceCents: products.priceCents, stock: products.stock })
+    .from(products)
+    .where(eq(products.id, id));
+  return row ?? null;
 }
 
-export async function listProductSlugs(pool: Pool): Promise<string[]> {
-  const { rows } = await pool.query<{ slug: string }>("SELECT slug FROM products ORDER BY id");
+export async function listProductSlugs(db: Db): Promise<string[]> {
+  const rows = await db.select({ slug: products.slug }).from(products).orderBy(products.id);
   return rows.map((r) => r.slug);
 }
 

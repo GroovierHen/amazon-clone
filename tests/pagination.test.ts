@@ -1,12 +1,12 @@
 import { beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { getPool } from "../src/db/client";
+import { getDb } from "../src/db/drizzle";
 import { listProducts, PAGE_SIZE, type ListParams, type ListResult } from "../src/lib/products";
 import { insertCategory, insertProducts, resetTables } from "./helpers";
 
 // The database is remote: a test with many round trips needs more than the default 5 seconds.
 setDefaultTimeout(120_000);
 
-const pool = getPool();
+const db = getDb();
 const TOTAL = 60;
 
 beforeAll(async () => {
@@ -30,7 +30,7 @@ async function walkForward(params: ListParams): Promise<ListResult[]> {
   const pages: ListResult[] = [];
   let after: string | undefined;
   do {
-    const page = await listProducts(pool, { ...params, after });
+    const page = await listProducts(db, { ...params, after });
     pages.push(page);
     after = page.nextCursor ?? undefined;
     if (pages.length > 20) throw new Error("Forward walk did not end");
@@ -42,7 +42,7 @@ async function walkBackward(params: ListParams, from: ListResult): Promise<ListR
   const pages: ListResult[] = [from];
   let before = from.prevCursor ?? undefined;
   while (before) {
-    const page = await listProducts(pool, { ...params, before });
+    const page = await listProducts(db, { ...params, before });
     pages.unshift(page);
     before = page.prevCursor ?? undefined;
     if (pages.length > 20) throw new Error("Backward walk did not end");
@@ -99,15 +99,15 @@ describe("keyset pagination", () => {
   });
 
   test("treats a cursor it cannot read as the first page", async () => {
-    const first = await listProducts(pool, { sort: "price-asc" });
+    const first = await listProducts(db, { sort: "price-asc" });
     for (const after of ["not-a-cursor", Buffer.from('["1; DROP TABLE products", 1]').toString("base64url")]) {
-      const page = await listProducts(pool, { sort: "price-asc", after });
+      const page = await listProducts(db, { sort: "price-asc", after });
       expect(page.items.map((i) => i.id)).toEqual(first.items.map((i) => i.id));
     }
   });
 
   test("returns a short page when a smaller limit is asked for", async () => {
-    const page = await listProducts(pool, { sort: "newest", limit: 6 });
+    const page = await listProducts(db, { sort: "newest", limit: 6 });
     expect(page.items).toHaveLength(6);
     expect(page.nextCursor).not.toBeNull();
   });

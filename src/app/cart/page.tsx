@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { CartView, EmptyCart } from "@/components/cart-view";
-import { getPool } from "@/db/client";
+import { getDb } from "@/db/drizzle";
 import { getCart } from "@/lib/cart";
 import { getVisitorId } from "@/lib/visitor";
 
@@ -24,7 +24,7 @@ export default function CartPage() {
 async function CartContents() {
   const visitorId = await getVisitorId();
   if (!visitorId) return <EmptyCart />;
-  const cart = await getCart(getPool(), visitorId);
+  const cart = await getCart(getDb(), visitorId);
   return <CartView lines={cart.lines} />;
 }
 

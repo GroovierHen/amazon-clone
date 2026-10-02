@@ -3,7 +3,7 @@
 import Image from "next/image";
 import { useState } from "react";
 
-/** Main photo with thumbnails. Only the main photo loads with priority (SPEC.md 6.6). */
+/** Main photo with thumbnails. Only the main photo is preloaded (SPEC.md 6.6). */
 export function ProductGallery({ images, title }: { images: string[]; title: string }) {
   const [selected, setSelected] = useState(0);
   const main = images[selected] ?? images[0];
@@ -17,7 +17,7 @@ export function ProductGallery({ images, title }: { images: string[]; title: str
             src={main}
             alt={title}
             fill
-            priority
+            preload
             sizes="(min-width: 1024px) 560px, (min-width: 768px) 50vw, 100vw"
             className="object-contain p-6"
           />

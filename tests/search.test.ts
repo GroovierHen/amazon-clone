@@ -1,15 +1,15 @@
 import { beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { getPool } from "../src/db/client";
+import { getDb } from "../src/db/drizzle";
 import { listProducts } from "../src/lib/products";
 import { insertCategory, insertProduct, resetTables } from "./helpers";
 
 // The database is remote: a test with many round trips needs more than the default 5 seconds.
 setDefaultTimeout(120_000);
 
-const pool = getPool();
+const db = getDb();
 
 const titles = async (q: string, extra: { category?: string; sort?: string } = {}) => {
-  const result = await listProducts(pool, { q, ...extra });
+  const result = await listProducts(db, { q, ...extra });
   return { titles: result.items.map((item) => item.title), match: result.match, total: result.total };
 };
 
@@ -58,7 +58,7 @@ describe("full-text search", () => {
   });
 
   test("can sort matches by something other than relevance", async () => {
-    const result = await listProducts(pool, { q: "hammer", sort: "newest" });
+    const result = await listProducts(db, { q: "hammer", sort: "newest" });
     expect(result.sort).toBe("newest");
     expect(result.items.map((i) => i.title)).toEqual(["Rubber Mallet", "Claw Hammer"]);
   });

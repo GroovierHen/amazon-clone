@@ -190,7 +190,7 @@ After the commit, invalidate the cache tags of every product in the order.
 ### 6.6 Images
 
 - Use `next/image` with a `sizes` value on every product image.
-- Set `priority` only on the main image at the top of the product page.
+- Set `preload` only on the main image at the top of the product page. Next.js 16 deprecates `priority` in favour of it.
 
 ### 6.7 Look and content
 

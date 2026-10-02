@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useOptimistic, useState, useTransition } from "react";
 import { removeFromCartAction, setCartQuantityAction } from "@/app/actions/cart";
-import { MAX_LINE_QUANTITY, summarize, type CartLine } from "@/lib/cart";
+import { MAX_LINE_QUANTITY, summarize, type CartLine } from "@/lib/cart-lines";
 import { formatPrice } from "@/lib/format";
 import { usePendingCart } from "./cart-provider";
 

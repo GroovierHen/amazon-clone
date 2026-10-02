@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useActionState, useState, useTransition } from "react";
 import { removeFromCartAction, setCartQuantityAction } from "@/app/actions/cart";
 import { placeOrderAction, type CheckoutState, type ShippingField } from "@/app/actions/checkout";
-import { summarize, type CartLine } from "@/lib/cart";
+import { summarize, type CartLine } from "@/lib/cart-lines";
 import { formatPrice } from "@/lib/format";
 
 const FIELDS: Array<{ name: ShippingField; label: string; autoComplete: string; wide: boolean }> = [

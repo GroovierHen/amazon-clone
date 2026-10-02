@@ -1,11 +1,7 @@
-import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import { Pool, types } from "pg";
-import * as schema from "./schema";
 
 // Ids are bigint in Postgres and stay far below 2^53, so plain numbers are safe.
 types.setTypeParser(types.builtins.INT8, (value) => Number(value));
-
-export type Db = NodePgDatabase<typeof schema>;
 
 /**
  * DB_SEARCH_PATH is set only by the test setup ("test,public"). It needs a
@@ -39,10 +35,6 @@ const globalForDb = globalThis as unknown as { stockroomPool?: Pool };
 export function getPool(): Pool {
   globalForDb.stockroomPool ??= new Pool(poolConfig(false));
   return globalForDb.stockroomPool;
-}
-
-export function getDb(): Db {
-  return drizzle(getPool(), { schema });
 }
 
 /** Direct, unpooled pool for migrations and the seed script. The caller ends it. */
