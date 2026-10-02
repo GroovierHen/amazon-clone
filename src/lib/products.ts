@@ -245,3 +245,87 @@ export async function listCategories(pool: Pool): Promise<CategorySummary[]> {
     imageUrl: r.image_url,
   }));
 }
+
+/** The slow-changing part of a product: what it is. */
+export type ProductContent = {
+  id: number;
+  slug: string;
+  title: string;
+  description: string;
+  imageUrls: string[];
+  ratingAvg: number;
+  ratingCount: number;
+  categorySlug: string;
+  categoryName: string;
+};
+
+/** The fast-changing part of a product: what it costs and how many are left. */
+export type ProductOffer = {
+  priceCents: number;
+  stock: number;
+};
+
+export async function findProductBySlug(pool: Pool, slug: string): Promise<ProductContent | null> {
+  const { rows } = await pool.query<{
+    id: number;
+    slug: string;
+    title: string;
+    description: string;
+    image_urls: string[];
+    rating_avg: string;
+    rating_count: number;
+    category_slug: string;
+    category_name: string;
+  }>(
+    `SELECT p.id, p.slug, p.title, p.description, p.image_urls, p.rating_avg, p.rating_count,
+            c.slug AS category_slug, c.name AS category_name
+     FROM products p JOIN categories c ON c.id = p.category_id
+     WHERE p.slug = $1`,
+    [slug],
+  );
+  const r = rows[0];
+  if (!r) return null;
+  return {
+    id: r.id,
+    slug: r.slug,
+    title: r.title,
+    description: r.description,
+    imageUrls: r.image_urls,
+    ratingAvg: Number(r.rating_avg),
+    ratingCount: r.rating_count,
+    categorySlug: r.category_slug,
+    categoryName: r.category_name,
+  };
+}
+
+export async function findProductOffer(pool: Pool, id: number): Promise<ProductOffer | null> {
+  const { rows } = await pool.query<{ price_cents: number; stock: number }>(
+    "SELECT price_cents, stock FROM products WHERE id = $1",
+    [id],
+  );
+  return rows[0] ? { priceCents: rows[0].price_cents, stock: rows[0].stock } : null;
+}
+
+export async function listProductSlugs(pool: Pool): Promise<string[]> {
+  const { rows } = await pool.query<{ slug: string }>("SELECT slug FROM products ORDER BY id");
+  return rows.map((r) => r.slug);
+}
+
+/**
+ * Seed descriptions are a paragraph or two, then "Label: value" lines.
+ * Splits them so the page can show prose as prose and facts as a list.
+ */
+export function splitDescription(description: string): { paragraphs: string[]; facts: Array<[string, string]> } {
+  const paragraphs: string[] = [];
+  const facts: Array<[string, string]> = [];
+  for (const block of description.split(/\n{2,}/)) {
+    const lines = block.split("\n").map((line) => line.trim()).filter(Boolean);
+    const pairs = lines.map((line) => line.match(/^([A-Z][A-Za-z ]{1,24}): (.+)$/));
+    if (lines.length > 0 && pairs.every(Boolean)) {
+      for (const pair of pairs) facts.push([pair![1], pair![2]]);
+    } else if (lines.length > 0) {
+      paragraphs.push(lines.join(" "));
+    }
+  }
+  return { paragraphs, facts };
+}

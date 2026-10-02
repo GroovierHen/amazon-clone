@@ -30,7 +30,7 @@ export function ProductCard({ product }: { product: Product }) {
       </h3>
       <Rating average={product.ratingAvg} count={product.ratingCount} className="mt-1" />
       <p className="type-narrow mt-1 text-2xl font-bold">{formatPrice(product.priceCents)}</p>
-      <StockNote stock={product.stock} className="mt-1" />
+      <StockNote stock={product.stock} className="mt-1 text-sm" />
     </li>
   );
 }
