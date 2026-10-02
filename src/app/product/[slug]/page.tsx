@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
+import { AddToCartButton } from "@/components/add-to-cart-button";
 import { ProductGallery } from "@/components/product-gallery";
 import { Rating } from "@/components/rating";
 import { StockNote } from "@/components/stock-note";
@@ -65,6 +66,7 @@ async function ProductDetails({ params }: { params: Params }) {
           <div className="mt-6 max-w-sm rounded-md border border-line p-5">
             <p className="type-narrow text-5xl font-bold leading-none">{formatPrice(offer.priceCents)}</p>
             <StockNote stock={offer.stock} exact className="mt-3 text-lg" />
+            <AddToCartButton productId={product.id} stock={offer.stock} />
           </div>
 
           <section aria-labelledby="about-heading" className="mt-8 max-w-prose">

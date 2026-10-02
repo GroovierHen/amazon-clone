@@ -9,7 +9,7 @@ export function ProductGallery({ images, title }: { images: string[]; title: str
   const main = images[selected] ?? images[0];
 
   return (
-    <div className="flex flex-col gap-3 md:flex-row-reverse">
+    <div className="flex flex-col gap-3 self-start md:flex-row-reverse md:items-start">
       <div className="relative aspect-square w-full overflow-hidden rounded-md bg-shelf">
         {main ? (
           <Image
