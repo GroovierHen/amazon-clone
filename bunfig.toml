@@ -1,0 +1,4 @@
+[test]
+# Points the database client at the `test` schema and rebuilds that schema.
+preload = ["./tests/setup.ts"]
+root = "./tests"
