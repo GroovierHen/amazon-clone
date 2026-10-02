@@ -39,3 +39,17 @@ export function searchHref(params: SearchHrefParams): string {
   const text = query.toString();
   return text ? `/search?${text}` : "/search";
 }
+
+const dateTime = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "long",
+  year: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZone: "UTC",
+});
+
+/** Dates are shown in UTC and say so, because the server does not know the visitor's time zone. */
+export function formatDate(iso: string): string {
+  return `${dateTime.format(new Date(iso))} UTC`;
+}
