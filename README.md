@@ -6,6 +6,11 @@ checkout, orders) and changes what gets in a shopper's way.
 
 One Next.js app and one Postgres database. No accounts, no payment, no ads.
 
+- Live site: https://stockroom-store.vercel.app
+- Repository: https://github.com/GroovierHen/stockroom
+- How it was built: every prompt and final response is in [`.agent-logs/`](.agent-logs), and
+  [`CAPTURE-TEST.md`](CAPTURE-TEST.md) shows the capture working.
+
 ## Product decisions
 
 ### Kept from Amazon
@@ -81,6 +86,16 @@ the app reads. `bun run test:e2e` places a real order in the app's database, for
 product seeded with 150. Set `E2E_BASE_URL` to run it against a deployed site.
 
 Run `bunx playwright install chromium` once before the first end-to-end run.
+
+The tests talk to the real database, so `bun test` takes a few minutes when Postgres is on
+another continent and a few seconds when it is local.
+
+### Deploying
+
+Vercel builds and deploys every push to `main`. The Neon database is connected through the
+Vercel Marketplace, which supplies `DATABASE_URL` and `DATABASE_URL_UNPOOLED` to the build and
+to the running app. Run `bun run db:migrate` and `bun run db:seed` against the database before
+the first deploy: the build prerenders pages from it.
 
 ## Architecture
 
