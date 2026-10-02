@@ -179,7 +179,9 @@ export async function listProducts(db: Db, params: ListParams): Promise<ListResu
         ratingCount: matched.ratingCount,
         imageUrl: matched.imageUrl,
         // Postgres's own text for the sort value, so the cursor compares exactly.
-        sortValue: sql<string>`${sortValue}::text`,
+        // A float4 goes through float8 first: its own text is rounded when the server
+        // runs with extra_float_digits = 0, and would not cast back to the same rank.
+        sortValue: spec.cast === "float4" ? sql<string>`${sortValue}::float8::text` : sql<string>`${sortValue}::text`,
       })
       .from(matched)
       .where(

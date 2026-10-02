@@ -55,7 +55,7 @@ One Next.js app and one Postgres database. No accounts, no payment, no ads.
 ## Setup
 
 You need [Bun](https://bun.sh) 1.x, Node 20 or newer (Playwright's test runner needs Node), and a
-Postgres database. The project is set up for Neon through the Vercel Marketplace.
+Postgres database. The project is set up for Supabase through the Vercel Marketplace.
 
 ```sh
 bun install
@@ -92,10 +92,15 @@ another continent and a few seconds when it is local.
 
 ### Deploying
 
-Vercel builds and deploys every push to `main`. The Neon database is connected through the
-Vercel Marketplace, which supplies `DATABASE_URL` and `DATABASE_URL_UNPOOLED` to the build and
-to the running app. Run `bun run db:migrate` and `bun run db:seed` against the database before
-the first deploy: the build prerenders pages from it.
+Vercel builds and deploys every push to `main`. The Supabase database is connected through the
+Vercel Marketplace with the prefix `SUPABASE_`, which supplies `SUPABASE_POSTGRES_URL` and
+`SUPABASE_POSTGRES_URL_NON_POOLING` to the build and to the running app. Run `bun run db:migrate`
+and `bun run db:seed` against the database before the first deploy: the build prerenders pages
+from it.
+
+The app uses Supabase as plain Postgres, through node-postgres. It does not use the Supabase
+Data API, so every table has row level security turned on with no policies, which closes that
+API to the tables. The app connects as the table owner and is not affected.
 
 ## Architecture
 

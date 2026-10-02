@@ -39,7 +39,7 @@ Out of scope unless section 10 says otherwise:
 - Next.js 16, current stable 16.3.x, App Router, TypeScript in strict mode
 - React Server Components, Server Actions, Suspense, useOptimistic
 - Cache Components turned on with `cacheComponents: true`
-- PostgreSQL on Neon, provisioned through the Vercel Marketplace
+- PostgreSQL on Supabase, provisioned through the Vercel Marketplace. It was on Neon until slice 9.
 - Drizzle ORM with SQL migrations
 - Tailwind CSS
 - `bun test` for unit and integration tests
@@ -55,10 +55,11 @@ The Vercel CLI is installed and logged in. Run `vercel link` if the folder is no
 
 Database:
 
-- Provision it with `vercel install neon --plan free`. The command creates the Postgres database, connects it to the project and writes the connection variables to `.env.local`.
+- Provision it with `vercel integration add supabase --plan free --prefix SUPABASE_`. The command creates the Postgres database, connects it to the project and writes the connection variables to `.env.local`.
 - Read `.env.local` to learn the variable names. Never print the values and never commit the file.
-- Use the pooled connection for the app. Use the unpooled connection for migrations if the integration provides one.
-- The place-order transaction is interactive. Use a driver that supports interactive transactions, such as node-postgres or the Neon serverless Pool. Do not use the Neon HTTP driver for it.
+- Use the pooled connection for the app. Use the non-pooling connection for migrations if the integration provides one.
+- The place-order transaction is interactive. Use a driver that supports interactive transactions, such as node-postgres. Do not use an HTTP driver or the Supabase Data API for it.
+- The app uses Supabase as plain Postgres. Turn on row level security for every table in `public`, with no policies, so the Supabase Data API cannot reach them.
 - Tests run in a separate Postgres schema named `test`. Tests must never touch the schema the app reads.
 
 Cost:
@@ -78,7 +79,7 @@ Bun on Vercel:
 
 Deploy:
 
-- Run migrations and the seed script against the Neon database before the first deploy.
+- Run migrations and the seed script against the Supabase database before the first deploy.
 - Preview with `vercel deploy`. Production with `vercel deploy --prod`.
 
 ## 4. Data model
@@ -240,6 +241,7 @@ Tick each box when the slice passes its checks, then commit.
 - [x] 6. Product decisions from section 10 that slices 1 to 5 did not already cover
 - [x] 7. UX pass on every page using the UX check in section 7
 - [x] 8. README, `.env.example`, final production deploy, end-to-end test run against the deployed URL
+- [x] 9. Database moved from Neon to Supabase: data copied, production deploy, end-to-end test run against the deployed URL
 
 Deploy to production at the end of slice 2 and after every slice from then on. A working live link early matters more than a complete one late.
 

@@ -1,11 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
-import { Pool } from "pg";
 
 // Runs once before the test files. Tests use a real Postgres database, in a
 // schema named `test`, and never touch the schema the app reads (SPEC.md 3.1).
 
 // `bun test` sets NODE_ENV=test, and Bun then skips .env.local, so read it here.
-if (!process.env.DATABASE_URL && existsSync(".env.local")) {
+if (!process.env.SUPABASE_POSTGRES_URL && existsSync(".env.local")) {
   for (const line of readFileSync(".env.local", "utf8").split("\n")) {
     const match = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
     if (!match || process.env[match[1]] !== undefined) continue;
@@ -13,19 +12,25 @@ if (!process.env.DATABASE_URL && existsSync(".env.local")) {
   }
 }
 
-const connectionString = process.env.DATABASE_URL_UNPOOLED ?? process.env.DATABASE_URL;
-if (!connectionString) {
-  throw new Error("Tests need DATABASE_URL (see .env.example). Run `vercel env pull` first.");
+if (!process.env.SUPABASE_POSTGRES_URL) {
+  throw new Error("Tests need SUPABASE_POSTGRES_URL (see .env.example). Run `vercel env pull` first.");
 }
 
 // Every pool created after this line sees only `test`, then `public` for extensions.
 process.env.DB_SEARCH_PATH = "test,public";
 
-const admin = new Pool({ connectionString: connectionString.replace("sslmode=require", "sslmode=verify-full"), max: 1 });
+const { createDirectPool, getPool } = await import("../src/db/client");
+const { migrate } = await import("../src/db/migrate");
+
+const admin = createDirectPool();
 await admin.query("DROP SCHEMA IF EXISTS test CASCADE");
 await admin.query("CREATE SCHEMA test");
 await admin.end();
 
-const { getPool } = await import("../src/db/client");
-const { migrate } = await import("../src/db/migrate");
+// Stop here rather than let a test write to the app's tables.
+const { rows } = await getPool().query<{ schema: string }>("SELECT current_schema() AS schema");
+if (rows[0].schema !== "test") {
+  throw new Error(`Tests must run in the test schema, but the connection is in "${rows[0].schema}".`);
+}
+
 await migrate(getPool());
