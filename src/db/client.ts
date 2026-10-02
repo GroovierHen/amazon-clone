@@ -22,6 +22,10 @@ function poolConfig(direct: boolean) {
   return {
     connectionString,
     max: 10,
+    // Fail with an error the page can show, rather than hang, when the database is unreachable.
+    connectionTimeoutMillis: 8_000,
+    query_timeout: 10_000,
+    idleTimeoutMillis: 30_000,
     ...(searchPath ? { options: `-c search_path=${searchPath}` } : {}),
   };
 }

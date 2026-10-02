@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-export default function ErrorPage({ reset }: { error: Error & { digest?: string }; reset: () => void }) {
+export default function ErrorPage({ retry }: { error: Error & { digest?: string }; retry: () => void }) {
   return (
     <div className="container-page py-16">
       <h1 className="type-wide text-2xl font-bold md:text-3xl">This page did not load.</h1>
@@ -13,7 +13,7 @@ export default function ErrorPage({ reset }: { error: Error & { digest?: string 
       <p className="mt-6 flex flex-wrap gap-3">
         <button
           type="button"
-          onClick={reset}
+          onClick={() => retry()}
           className="rounded-md bg-pine px-4 py-2.5 font-semibold text-white hover:bg-pine-deep"
         >
           Try again

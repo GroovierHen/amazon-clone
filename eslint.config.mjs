@@ -12,6 +12,10 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // Local scratch output from the UX check and Playwright.
+    ".screenshots/**",
+    "test-results/**",
+    "playwright-report/**",
   ]),
 ]);
 

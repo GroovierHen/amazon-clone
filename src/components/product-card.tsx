@@ -10,7 +10,7 @@ const CARD_SIZES = "(min-width: 1280px) 190px, (min-width: 1024px) 22vw, (min-wi
 
 export function ProductCard({ product }: { product: Product }) {
   return (
-    <li className="group relative flex flex-col">
+    <li className="group relative flex flex-col rounded-md has-[a:focus-visible]:outline-3 has-[a:focus-visible]:outline-offset-4 has-[a:focus-visible]:outline-pine">
       <div className="relative aspect-square overflow-hidden rounded-md bg-shelf">
         {product.imageUrl ? (
           <Image
@@ -23,8 +23,8 @@ export function ProductCard({ product }: { product: Product }) {
         ) : null}
       </div>
       <h3 className="mt-3 line-clamp-2 text-[0.95rem] font-medium leading-snug">
-        {/* The link covers the whole card, so the photo is clickable too. */}
-        <Link href={`/product/${product.slug}`} className="after:absolute after:inset-0 group-hover:underline">
+        {/* The link covers the whole card, so the photo is clickable too, and the focus ring goes around the card. */}
+        <Link href={`/product/${product.slug}`} className="after:absolute after:inset-0 focus-visible:outline-none group-hover:underline">
           {product.title}
         </Link>
       </h3>

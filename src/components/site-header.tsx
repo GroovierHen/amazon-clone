@@ -41,7 +41,16 @@ export function SiteHeader() {
 
 async function CartCount() {
   const visitorId = await getVisitorId();
-  const count = visitorId ? await getCartCount(getPool(), visitorId) : 0;
+  let count = 0;
+  if (visitorId) {
+    try {
+      count = await getCartCount(getPool(), visitorId);
+    } catch (error) {
+      // A missing number in the header is better than losing the whole page.
+      console.error("Cart count failed", error);
+      return null;
+    }
+  }
   return <CartCountBadge count={count} />;
 }
 
