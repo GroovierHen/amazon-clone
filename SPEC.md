@@ -2,13 +2,14 @@
 
 ## Status
 
-Sections 1 to 9 are decided. Section 10 is empty until the assessment brief opens.
-Do not start building while section 10 is empty. If the brief conflicts with sections 1 to 9, the brief wins.
+The brief is in section 10. If section 10 conflicts with sections 1 to 9, section 10 wins.
+Do not start slice 1 until the agent capture test in slice 0 passes.
 
 ## 1. Goal
 
-A minimal clone of the amazon.com storefront, built in one day for a hiring assessment.
-The reviewer compares it against the live site.
+A rebuild of the amazon.com storefront for a hiring assessment, with a 24 hour window.
+The brief asks for a product that uses Amazon as a reference, not a pixel copy.
+The reviewers judge speed, product judgement, and UX and UI.
 
 One Next.js app and one Postgres database. No microservices, no Redis, no separate search engine.
 
@@ -23,7 +24,7 @@ In scope:
 - Checkout with a shipping form and a "Place your order" button. No payment step.
 - Stock check when the order is placed, stock decrement on success
 - Order history and order detail
-- The added feature from section 10
+- The product decisions in section 10
 
 Out of scope unless section 10 says otherwise:
 
@@ -193,7 +194,9 @@ After the commit, invalidate the cache tags of every product in the order.
 
 ### 6.7 Look and content
 
-- Match Amazon's layout, colors and behavior using the screenshots in `/reference`.
+- Use Amazon for the shape of the flows: browse, search, product page, cart, checkout, orders. Do not copy its visual design.
+- Give the store its own name, colors and type. The name is in section 10.
+- If `/reference` exists, use its screenshots to understand Amazon's flows. Do not match them pixel for pixel.
 - Do not download Amazon's logo files, product photos or product text.
 - Seed at least 200 products across 8 categories so pagination and search have real work to do.
 - Take seed data from a public sample product dataset if one is reachable. Otherwise generate it with a script and local placeholder images.
@@ -216,36 +219,81 @@ Tests that must exist by the end:
 - Concurrency. One product with stock 1, ten carts, ten parallel place-order calls. Exactly one succeeds and stock ends at 0.
 - End to end with Playwright. Search, open a product, add to cart, place the order, see it in order history, confirm stock dropped by the ordered quantity.
 
-Visual check:
+UX check, for every page:
 
-- Screenshot each page at 1440px and 390px wide.
-- Compare with the matching file in `/reference`.
-- List the differences and fix them.
+- Screenshot it at 1440px and 390px wide and look at the result.
+- Nothing overflows or overlaps at either width.
+- Loading, empty and error states exist and read clearly.
+- Every action is reachable by keyboard and has a visible focus state.
+- The main action on the page is the most prominent thing on it.
 
 ## 8. Build order
 
 Tick each box when the slice passes its checks, then commit.
 
+- [x] 0. Agent capture setup from section 10. The capture test passes and `.agent-logs/` is committed.
 - [ ] 1. Project setup with Bun, Vercel link, Neon database, schema, migrations, seed script
 - [ ] 2. Home page, search results with keyset pagination, search
 - [ ] 3. Product page
 - [ ] 4. Cart
 - [ ] 5. Checkout, place order transaction, order history
-- [ ] 6. Added feature from section 10
-- [ ] 7. Visual pass against `/reference`
-- [ ] 8. README, `.env.example`, production deploy to Vercel, end-to-end test run against the deployed URL
+- [ ] 6. Product decisions from section 10 that slices 1 to 5 did not already cover
+- [ ] 7. UX pass on every page using the UX check in section 7
+- [ ] 8. README, `.env.example`, final production deploy, end-to-end test run against the deployed URL
+
+Deploy to production at the end of slice 2 and after every slice from then on. A working live link early matters more than a complete one late.
 
 ## 9. Deliverables
 
-- README with setup steps, a short architecture summary, the decisions and trade-offs from this spec, and the out of scope list
+- A public GitHub repository with `.agent-logs/` committed in it
+- The production URL on Vercel, open to a visitor who is not signed in to anything
+- README with setup steps, a short architecture summary, and a "Product decisions" section that lists what was kept, cut and changed from Amazon, with one line of reasoning each
 - `.env.example`
-- The production URL on Vercel
-- A git history with one commit per slice
+- A git history with at least one commit per slice
+
+The walkthrough video is recorded by the candidate, not by the agent.
 
 ## 10. From the brief
 
-Fill this in when the brief opens.
+### 10.1 What the brief asks for
 
-- Requirements from the brief:
-- Added feature:
-- Submission format and deadline:
+- Rebuild amazon.com within a 24 hour window. The clock is tracked, not enforced.
+- Use the product as a reference, not a blueprint. A pixel for pixel copy scores poorly. Show what was changed, what was cut and how it is better to use.
+- Judged on speed, product judgement, and UX and UI.
+  - Speed is how much working product exists in the time.
+  - Product judgement is what was built first and what was left out.
+  - UX and UI is whether the shipped product is good to use.
+
+### 10.2 Agent capture
+
+- Before any building, follow the 8x agent capture setup so prompts and responses are saved into the repository. The candidate pastes the setup instructions into the session.
+- Do not start slice 1 until the capture test passes.
+- Commit `.agent-logs/` with every slice commit. Never add it to `.gitignore`.
+
+### 10.3 Hand-in
+
+- A live link, deployed and open.
+- A public repository with `.agent-logs/` in it.
+- A walkthrough video of five minutes at most, camera on.
+
+### 10.4 Product decisions
+
+Store name: Stockroom
+
+Cut from Amazon:
+
+- Sponsored results and ads
+- The sign-in wall. A visitor can browse, add to cart, order and see past orders without an account.
+- Payment
+- Third-party sellers, Prime upsells, recommendation carousels, wish lists
+- Writing reviews. Ratings are shown, read only.
+
+Changed to make it better to use:
+
+- Search results contain only real matches, with sort and category filter in plain view.
+- Search tolerates typos.
+- The product page puts price, stock and "Add to cart" at the top, with nothing between them.
+- Stock is honest. The product page shows "Only N left" when stock is low. If stock runs out while ordering, the checkout page names the item and the quantity still available.
+- Cart changes show at once, before the server answers.
+- Checkout is one page with a shipping form and a single "Place your order" button.
+- Pages load from cache. Only the cart count, cart, checkout and orders render per visitor.

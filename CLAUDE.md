@@ -36,6 +36,9 @@ The database connection variables are in `.env.local`. Tests need a real Postgre
 
 - Build the slices in SPEC.md section 8 in order.
 - A slice is done when typecheck, lint, build and tests pass. Show the command output.
-- Tick the slice in SPEC.md section 8, then commit with a message that names the slice.
-- For UI work, screenshot the page and compare it with the matching file in `/reference`.
+- Tick the slice in SPEC.md section 8, then commit with a message that names the slice. Include `.agent-logs/` in every commit.
+- IMPORTANT: never add `.agent-logs/` to `.gitignore`. The assessment requires it in the public repository.
+- For UI work, screenshot the page at 1440px and 390px and run the UX check in SPEC.md section 7.
+- This is not a pixel copy of Amazon. Follow the product decisions in SPEC.md 10.4.
+- Deploy to production at the end of slice 2 and after every later slice.
 - If a requirement is unclear or missing from SPEC.md, stop and ask. Do not guess.
