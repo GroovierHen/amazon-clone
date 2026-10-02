@@ -1,9 +1,12 @@
 import { randomUUID } from "node:crypto";
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { getPool } from "../src/db/client";
 import { addToCart, getCart } from "../src/lib/cart";
 import { getOrder, listOrders, placeOrder } from "../src/lib/orders";
 import { insertCategory, insertProduct, resetTables } from "./helpers";
+
+// The database is remote: a test with many round trips needs more than the default 5 seconds.
+setDefaultTimeout(120_000);
 
 const pool = getPool();
 const shipping = { name: "Ada Lovelace", address: "12 Analytical Row\nLondon N1 9GU" };

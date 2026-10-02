@@ -32,3 +32,8 @@ reference/
 
 # UX check screenshots
 /.screenshots/
+
+# Agent skills that `vercel install neon` drops into the project
+/.agents/
+/.claude/skills/
+/skills-lock.json

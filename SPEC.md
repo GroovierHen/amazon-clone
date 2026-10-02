@@ -232,13 +232,13 @@ UX check, for every page:
 Tick each box when the slice passes its checks, then commit.
 
 - [x] 0. Agent capture setup from section 10. The capture test passes and `.agent-logs/` is committed.
-- [ ] 1. Project setup with Bun, Vercel link, Neon database, schema, migrations, seed script
-- [ ] 2. Home page, search results with keyset pagination, search
-- [ ] 3. Product page
-- [ ] 4. Cart
-- [ ] 5. Checkout, place order transaction, order history
-- [ ] 6. Product decisions from section 10 that slices 1 to 5 did not already cover
-- [ ] 7. UX pass on every page using the UX check in section 7
+- [x] 1. Project setup with Bun, Vercel link, Neon database, schema, migrations, seed script
+- [x] 2. Home page, search results with keyset pagination, search
+- [x] 3. Product page
+- [x] 4. Cart
+- [x] 5. Checkout, place order transaction, order history
+- [x] 6. Product decisions from section 10 that slices 1 to 5 did not already cover
+- [x] 7. UX pass on every page using the UX check in section 7
 - [ ] 8. README, `.env.example`, final production deploy, end-to-end test run against the deployed URL
 
 Deploy to production at the end of slice 2 and after every slice from then on. A working live link early matters more than a complete one late.

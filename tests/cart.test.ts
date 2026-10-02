@@ -1,7 +1,10 @@
-import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { beforeAll, beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { getPool } from "../src/db/client";
 import { addToCart, getCart, getCartCount, MAX_LINE_QUANTITY, removeFromCart, setCartQuantity } from "../src/lib/cart";
 import { insertCategory, insertProduct, resetTables } from "./helpers";
+
+// The database is remote: a test with many round trips needs more than the default 5 seconds.
+setDefaultTimeout(120_000);
 
 const pool = getPool();
 const visitor = "11111111-1111-4111-8111-111111111111";

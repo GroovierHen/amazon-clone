@@ -21,7 +21,7 @@ if (!connectionString) {
 // Every pool created after this line sees only `test`, then `public` for extensions.
 process.env.DB_SEARCH_PATH = "test,public";
 
-const admin = new Pool({ connectionString, max: 1 });
+const admin = new Pool({ connectionString: connectionString.replace("sslmode=require", "sslmode=verify-full"), max: 1 });
 await admin.query("DROP SCHEMA IF EXISTS test CASCADE");
 await admin.query("CREATE SCHEMA test");
 await admin.end();

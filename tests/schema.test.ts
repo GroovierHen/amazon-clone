@@ -1,8 +1,11 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { getPool } from "../src/db/client";
 import { migrate } from "../src/db/migrate";
 import { seed } from "../src/db/seed";
 import { insertCategory, insertProduct, resetTables } from "./helpers";
+
+// The database is remote: a test with many round trips needs more than the default 5 seconds.
+setDefaultTimeout(120_000);
 
 const pool = getPool();
 

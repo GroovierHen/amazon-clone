@@ -31,7 +31,9 @@ export async function placeOrder(pool: Pool, visitorId: string, shipping: Shippi
 
     // 1. Read the cart items. The cart row is locked first, so the same cart
     //    submitted twice at once produces one order: the second waits here and
-    //    then finds the cart empty.
+    //    then finds the cart empty. The items are read in a separate statement
+    //    on purpose. A statement that waited for the lock keeps its old snapshot
+    //    for joined tables, and would still see the items the first order took.
     const cart = await client.query<{ id: string }>("SELECT id FROM carts WHERE visitor_id = $1 FOR UPDATE", [
       visitorId,
     ]);
@@ -78,32 +80,36 @@ export async function placeOrder(pool: Pool, visitorId: string, shipping: Shippi
       return { ok: false, reason: "short", shortItems };
     }
 
-    // 4. Decrement stock.
-    await client.query(
-      `UPDATE products p SET stock = p.stock - x.quantity
-       FROM unnest($1::bigint[], $2::int[]) AS x(id, quantity)
-       WHERE p.id = x.id`,
-      [productIds, quantities],
-    );
-
-    // 5. Insert the order and its items, copying title and price from the product.
+    // 4 to 6 run as one statement, in this order, so the product rows stay
+    // locked for one round trip instead of four.
     const totalCents = items.reduce((sum, item) => sum + item.quantity * byId.get(item.product_id)!.price_cents, 0);
     const order = await client.query<{ id: number }>(
-      `INSERT INTO orders (visitor_id, status, total_cents, shipping_name, shipping_address)
-       VALUES ($1, 'placed', $2, $3, $4) RETURNING id`,
-      [visitorId, totalCents, shipping.name, shipping.address],
+      `WITH line AS (
+         SELECT x.id, x.quantity FROM unnest($5::bigint[], $6::int[]) AS x(id, quantity)
+       ),
+       -- 4. Decrement stock.
+       decremented AS (
+         UPDATE products p SET stock = p.stock - line.quantity FROM line WHERE p.id = line.id
+       ),
+       -- 5. Insert the order and its items, copying title and price from the product.
+       new_order AS (
+         INSERT INTO orders (visitor_id, status, total_cents, shipping_name, shipping_address)
+         VALUES ($1, 'placed', $2, $3, $4)
+         RETURNING id
+       ),
+       new_items AS (
+         INSERT INTO order_items (order_id, product_id, quantity, title, unit_price_cents)
+         SELECT new_order.id, p.id, line.quantity, p.title, p.price_cents
+         FROM new_order, line JOIN products p ON p.id = line.id
+       ),
+       -- 6. Delete the cart items.
+       emptied AS (
+         DELETE FROM cart_items WHERE cart_id = $7
+       )
+       SELECT id FROM new_order`,
+      [visitorId, totalCents, shipping.name, shipping.address, productIds, quantities, cartId],
     );
     const orderId = order.rows[0].id;
-    await client.query(
-      `INSERT INTO order_items (order_id, product_id, quantity, title, unit_price_cents)
-       SELECT $1, p.id, x.quantity, p.title, p.price_cents
-       FROM unnest($2::bigint[], $3::int[]) AS x(id, quantity)
-       JOIN products p ON p.id = x.id`,
-      [orderId, productIds, quantities],
-    );
-
-    // 6. Delete the cart items.
-    await client.query("DELETE FROM cart_items WHERE cart_id = $1", [cartId]);
 
     // 7. Commit.
     await client.query("COMMIT");

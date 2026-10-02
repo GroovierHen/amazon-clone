@@ -20,7 +20,10 @@ function poolConfig(direct: boolean) {
     throw new Error("DATABASE_URL is not set. Run `vercel env pull` to refresh .env.local.");
   }
   return {
-    connectionString,
+    // node-postgres already verifies the certificate for sslmode=require, and warns
+    // that this will change in its next major version. Asking for it by name keeps
+    // the check and drops the warning.
+    connectionString: connectionString.replace("sslmode=require", "sslmode=verify-full"),
     max: 10,
     // Fail with an error the page can show, rather than hang, when the database is unreachable.
     connectionTimeoutMillis: 8_000,

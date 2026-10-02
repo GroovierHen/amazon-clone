@@ -1,7 +1,10 @@
-import { beforeAll, describe, expect, test } from "bun:test";
+import { beforeAll, describe, expect, setDefaultTimeout, test } from "bun:test";
 import { getPool } from "../src/db/client";
 import { listProducts, PAGE_SIZE, type ListParams, type ListResult } from "../src/lib/products";
-import { insertCategory, insertProduct, resetTables } from "./helpers";
+import { insertCategory, insertProducts, resetTables } from "./helpers";
+
+// The database is remote: a test with many round trips needs more than the default 5 seconds.
+setDefaultTimeout(120_000);
 
 const pool = getPool();
 const TOTAL = 60;
@@ -11,16 +14,16 @@ beforeAll(async () => {
   const tools = await insertCategory("tools", "Tools");
   const toys = await insertCategory("toys", "Toys");
   // Few distinct prices, ratings and dates, so every sort has many ties to break.
-  for (let i = 0; i < TOTAL; i++) {
-    await insertProduct({
+  await insertProducts(
+    Array.from({ length: TOTAL }, (_, i) => ({
       title: i % 2 === 0 ? `Widget number ${i}` : `Gadget ${i}`,
       description: i % 2 === 0 ? "A plain part" : "Fits any widget",
       categoryId: i % 3 === 0 ? toys : tools,
       priceCents: 500 + (i % 5) * 100,
       ratingAvg: 3 + (i % 4) * 0.5,
       createdAt: new Date(Date.UTC(2026, 0, 1 + (i % 3))),
-    });
-  }
+    })),
+  );
 });
 
 async function walkForward(params: ListParams): Promise<ListResult[]> {
