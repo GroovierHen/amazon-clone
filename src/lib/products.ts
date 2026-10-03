@@ -1,14 +1,9 @@
-import { and, asc, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
+import { and, desc, eq, ilike, or, sql, type SQL } from "drizzle-orm";
 import type { Db } from "@/db/drizzle";
 import { categories, products } from "@/db/schema";
+import { keysetPage, type KeysetSort } from "./keyset";
 
-/**
- * Product list queries. Every list is keyset paginated (SPEC.md 6.1): the
- * cursor is the sort value and id of the row at the edge of the page, and the
- * next page is "rows strictly beyond that pair". OFFSET is never used.
- */
-
-export const PAGE_SIZE = 24;
+/** Product list queries. Every list is a keyset page (SPEC.md 6.1). */
 
 export const SORTS = ["relevance", "price-asc", "price-desc", "rating", "newest"] as const;
 export type SortKey = (typeof SORTS)[number];
@@ -53,44 +48,21 @@ export type ListResult = {
   match: "all" | "text" | "fuzzy";
 };
 
-type SortSpec = {
+type SortSpec = Pick<KeysetSort, "cast" | "direction"> & {
   /** Which field of the `matched` rows is the sort value. */
   field: "rank" | "priceCents" | "ratingAvg" | "createdAt";
-  /** Postgres type the cursor's sort value is cast back to. */
-  cast: "float4" | "integer" | "numeric" | "timestamptz";
-  direction: "ASC" | "DESC";
-  /** Shape a cursor's sort value must have before it is sent to Postgres. */
-  valid: RegExp;
 };
 
 const SORT_SPECS: Record<SortKey, SortSpec> = {
-  relevance: { field: "rank", cast: "float4", direction: "DESC", valid: /^-?\d+(\.\d+)?(e-?\d+)?$/ },
-  "price-asc": { field: "priceCents", cast: "integer", direction: "ASC", valid: /^\d+$/ },
-  "price-desc": { field: "priceCents", cast: "integer", direction: "DESC", valid: /^\d+$/ },
-  rating: { field: "ratingAvg", cast: "numeric", direction: "DESC", valid: /^\d+(\.\d+)?$/ },
-  newest: { field: "createdAt", cast: "timestamptz", direction: "DESC", valid: /^[\d\-:.+ ]+$/ },
+  relevance: { field: "rank", cast: "float4", direction: "DESC" },
+  "price-asc": { field: "priceCents", cast: "integer", direction: "ASC" },
+  "price-desc": { field: "priceCents", cast: "integer", direction: "DESC" },
+  rating: { field: "ratingAvg", cast: "numeric", direction: "DESC" },
+  newest: { field: "createdAt", cast: "timestamptz", direction: "DESC" },
 };
 
 /** How close a title has to be to the query for the typo-tolerant fallback. */
 const FUZZY_THRESHOLD = 0.45;
-
-export function encodeCursor(sortValue: string, id: number): string {
-  return Buffer.from(JSON.stringify([sortValue, id])).toString("base64url");
-}
-
-export function decodeCursor(cursor: string | undefined, spec: SortSpec): [string, number] | null {
-  if (!cursor) return null;
-  try {
-    const parsed: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
-    if (!Array.isArray(parsed) || parsed.length !== 2) return null;
-    const [value, id] = parsed;
-    if (typeof value !== "string" || !spec.valid.test(value)) return null;
-    if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 0) return null;
-    return [value, id];
-  } catch {
-    return null;
-  }
-}
 
 export function normalizeQuery(q: string | undefined): string {
   return (q ?? "").trim().replace(/\s+/g, " ").slice(0, 100);
@@ -105,8 +77,6 @@ export function resolveSort(sort: string | undefined, hasQuery: boolean): SortKe
 export async function listProducts(db: Db, params: ListParams): Promise<ListResult> {
   const q = normalizeQuery(params.q);
   const sort = resolveSort(params.sort, q !== "");
-  const spec = SORT_SPECS[sort];
-  const limit = Math.min(Math.max(params.limit ?? PAGE_SIZE, 1), PAGE_SIZE);
 
   // 1. Which rows match. Full-text search first, trigram similarity on the
   //    title only when full-text search finds nothing at all (SPEC.md 6.2).
@@ -156,67 +126,42 @@ export async function listProducts(db: Db, params: ListParams): Promise<ListResu
       .where(and(...conditions)),
   );
 
-  // 2. Which side of the cursor. `before` walks backwards, so both the
-  //    comparison and the order flip, and the rows are reversed afterwards.
-  const after = decodeCursor(params.after, spec);
-  const before = after ? null : decodeCursor(params.before, spec);
-  const cursor = after ?? before;
-  const backwards = before !== null;
-  const ascending = (spec.direction === "ASC") !== backwards;
-  const direction = ascending ? asc : desc;
-  const sortValue = matched[spec.field];
-
+  // 2. Which page of them, and how many there are in all.
+  const { field, cast, direction } = SORT_SPECS[sort];
   const [page, count] = await Promise.all([
-    db
-      .with(matched)
-      .select({
-        id: matched.id,
-        slug: matched.slug,
-        title: matched.title,
-        priceCents: matched.priceCents,
-        stock: matched.stock,
-        ratingAvg: matched.ratingAvg,
-        ratingCount: matched.ratingCount,
-        imageUrl: matched.imageUrl,
-        // Postgres's own text for the sort value, so the cursor compares exactly.
-        // A float4 goes through float8 first: its own text is rounded when the server
-        // runs with extra_float_digits = 0, and would not cast back to the same rank.
-        sortValue: spec.cast === "float4" ? sql<string>`${sortValue}::float8::text` : sql<string>`${sortValue}::text`,
-      })
-      .from(matched)
-      .where(
-        cursor
-          ? sql`(${sortValue}, ${matched.id}) ${ascending ? sql`>` : sql`<`} (${cursor[0]}::${sql.raw(spec.cast)}, ${cursor[1]}::bigint)`
-          : undefined,
-      )
-      .orderBy(direction(sortValue), direction(matched.id))
-      .limit(limit + 1),
+    keysetPage(
+      {
+        sort: { key: sort, value: matched[field], id: matched.id, cast, direction },
+        after: params.after,
+        before: params.before,
+        limit: params.limit,
+      },
+      (keyset) =>
+        db
+          .with(matched)
+          .select({
+            id: matched.id,
+            slug: matched.slug,
+            title: matched.title,
+            priceCents: matched.priceCents,
+            stock: matched.stock,
+            ratingAvg: matched.ratingAvg,
+            ratingCount: matched.ratingCount,
+            imageUrl: matched.imageUrl,
+            cursorValue: keyset.cursorValue,
+          })
+          .from(matched)
+          .where(keyset.where)
+          .orderBy(...keyset.orderBy)
+          .limit(keyset.limit),
+    ),
     db.with(matched).select({ total: sql<number>`count(*)::int` }).from(matched),
   ]);
 
-  // 3. One extra row was requested to learn whether another page follows.
-  const hasMore = page.length > limit;
-  const rows = page.slice(0, limit);
-  if (backwards) rows.reverse();
-
-  const first = rows[0];
-  const last = rows[rows.length - 1];
-  const hasNext = backwards ? rows.length > 0 : hasMore;
-  const hasPrev = backwards ? hasMore : after !== null && rows.length > 0;
-
   return {
-    items: rows.map((r) => ({
-      id: r.id,
-      slug: r.slug,
-      title: r.title,
-      priceCents: r.priceCents,
-      stock: r.stock,
-      ratingAvg: Number(r.ratingAvg),
-      ratingCount: r.ratingCount,
-      imageUrl: r.imageUrl,
-    })),
-    nextCursor: hasNext && last ? encodeCursor(last.sortValue, last.id) : null,
-    prevCursor: hasPrev && first ? encodeCursor(first.sortValue, first.id) : null,
+    items: page.rows.map((r) => ({ ...r, ratingAvg: Number(r.ratingAvg) })),
+    nextCursor: page.nextCursor,
+    prevCursor: page.prevCursor,
     total: count[0].total,
     sort,
     match,

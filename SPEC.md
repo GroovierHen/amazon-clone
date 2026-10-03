@@ -147,7 +147,7 @@ Indexes:
 
 Keyset only. Never use OFFSET.
 
-- The cursor is the pair of sort value and id, encoded as an opaque base64url string.
+- The cursor is the sort key, the sort value and the id, encoded as an opaque base64url string. A cursor from a different sort is read as the first page.
 - `after` loads the next page. `before` loads the previous page.
 - Show Next and Previous links. No numbered pages.
 - Page size is 24.

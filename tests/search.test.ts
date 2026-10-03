@@ -91,3 +91,45 @@ test("treats LIKE wildcards and SQL in the query as plain text", async () => {
   expect((await titles("'; DROP TABLE products; --")).titles).toEqual([]);
   expect((await titles("hammer")).titles).toHaveLength(2);
 });
+
+describe("paging", () => {
+  test("walks forward and back through every product with keyset cursors", async () => {
+    const page1 = await listProducts(db, { sort: "price-asc", limit: 2 });
+    const page2 = await listProducts(db, { sort: "price-asc", limit: 2, after: page1.nextCursor! });
+    const page3 = await listProducts(db, { sort: "price-asc", limit: 2, after: page2.nextCursor! });
+    const forward = [page1, page2, page3].map((p) => p.items.map((item) => item.id));
+    expect(new Set(forward.flat()).size).toBe(6);
+    expect(page3.nextCursor).toBeNull();
+
+    const back2 = await listProducts(db, { sort: "price-asc", limit: 2, before: page3.prevCursor! });
+    const back1 = await listProducts(db, { sort: "price-asc", limit: 2, before: back2.prevCursor! });
+    expect([back1, back2].map((p) => p.items.map((item) => item.id))).toEqual(forward.slice(0, 2));
+    expect(back1.prevCursor).toBeNull();
+  });
+
+  // Every sort, so each one reaches the keyset page with the right column, cast, direction and key.
+  const sorts: Array<{ sort: string; q?: string; limit: number }> = [
+    { sort: "price-asc", limit: 2 },
+    { sort: "price-desc", limit: 2 },
+    { sort: "rating", limit: 2 },
+    { sort: "newest", limit: 2 },
+    { sort: "relevance", q: "hammer", limit: 1 },
+  ];
+  for (const { sort, q, limit } of sorts) {
+    test(`pages through "${sort}" in the same order as one unpaged read, forward and back`, async () => {
+      const all = (await listProducts(db, { sort, q })).items.map((item) => item.id);
+      const forward = [await listProducts(db, { sort, q, limit })];
+      while (forward[forward.length - 1].nextCursor) {
+        forward.push(await listProducts(db, { sort, q, limit, after: forward[forward.length - 1].nextCursor! }));
+      }
+      const ids = (pages: typeof forward) => pages.map((p) => p.items.map((item) => item.id));
+      expect(ids(forward).flat()).toEqual(all);
+
+      const backward = [forward[forward.length - 1]];
+      while (backward[0].prevCursor) {
+        backward.unshift(await listProducts(db, { sort, q, limit, before: backward[0].prevCursor! }));
+      }
+      expect(ids(backward)).toEqual(ids(forward));
+    });
+  }
+});

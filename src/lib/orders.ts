@@ -1,6 +1,7 @@
-import { and, asc, desc, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, sql } from "drizzle-orm";
 import type { Db } from "@/db/drizzle";
 import { cartItems, carts, orderItems, orders, products } from "@/db/schema";
+import { keysetPage, type KeysetSort } from "./keyset";
 
 /**
  * Placing an order is the only place stock changes (SPEC.md 6.4). Orders are
@@ -122,8 +123,6 @@ export async function placeOrder(db: Db, visitorId: string, shipping: Shipping):
   }
 }
 
-export const ORDERS_PAGE_SIZE = 24;
-
 export type OrderSummary = {
   id: number;
   status: string;
@@ -140,23 +139,14 @@ export type OrderList = {
   prevCursor: string | null;
 };
 
-function encodeOrderCursor(createdAt: string, id: number): string {
-  return Buffer.from(JSON.stringify([createdAt, id])).toString("base64url");
-}
-
-function decodeOrderCursor(cursor: string | undefined): [string, number] | null {
-  if (!cursor) return null;
-  try {
-    const parsed: unknown = JSON.parse(Buffer.from(cursor, "base64url").toString("utf8"));
-    if (!Array.isArray(parsed) || parsed.length !== 2) return null;
-    const [createdAt, id] = parsed;
-    if (typeof createdAt !== "string" || !/^[\d\-:.+ ]+$/.test(createdAt)) return null;
-    if (typeof id !== "number" || !Number.isSafeInteger(id) || id < 0) return null;
-    return [createdAt, id];
-  } catch {
-    return null;
-  }
-}
+/** The cursor carries Postgres's own text for created_at, which keeps the microseconds a Date drops. */
+const NEWEST_FIRST: KeysetSort = {
+  key: "newest",
+  value: orders.createdAt,
+  id: orders.id,
+  cast: "timestamptz",
+  direction: "DESC",
+};
 
 /** A visitor's orders, newest first, keyset paginated on (created_at, id). */
 export async function listOrders(
@@ -164,13 +154,6 @@ export async function listOrders(
   visitorId: string,
   page: { after?: string; before?: string; limit?: number } = {},
 ): Promise<OrderList> {
-  const limit = Math.min(Math.max(page.limit ?? ORDERS_PAGE_SIZE, 1), ORDERS_PAGE_SIZE);
-  const after = decodeOrderCursor(page.after);
-  const before = after ? null : decodeOrderCursor(page.before);
-  const cursor = after ?? before;
-  const backwards = before !== null;
-  const direction = backwards ? asc : desc;
-
   // Per-order subqueries, so they run only for the rows on this page.
   const itemCount = db
     .select({ n: sql`coalesce(sum(${orderItems.quantity}), 0)::int` })
@@ -183,48 +166,27 @@ export async function listOrders(
     .orderBy(orderItems.productId)
     .limit(3);
 
-  const rows = await db
-    .select({
-      id: orders.id,
-      status: orders.status,
-      totalCents: orders.totalCents,
-      createdAt: orders.createdAt,
-      // The cursor needs Postgres's own text, which keeps the microseconds a Date drops.
-      cursorValue: sql<string>`${orders.createdAt}::text`,
-      itemCount: sql<number>`${itemCount}`,
-      titles: sql<string[]>`ARRAY${firstTitles}`,
-    })
-    .from(orders)
-    .where(
-      and(
-        eq(orders.visitorId, visitorId),
-        cursor
-          ? sql`(${orders.createdAt}, ${orders.id}) ${backwards ? sql`>` : sql`<`} (${cursor[0]}::timestamptz, ${cursor[1]}::bigint)`
-          : undefined,
-      ),
-    )
-    .orderBy(direction(orders.createdAt), direction(orders.id))
-    .limit(limit + 1);
-
-  const hasMore = rows.length > limit;
-  const pageRows = rows.slice(0, limit);
-  if (backwards) pageRows.reverse();
-  const first = pageRows[0];
-  const last = pageRows[pageRows.length - 1];
-  const hasNext = backwards ? pageRows.length > 0 : hasMore;
-  const hasPrev = backwards ? hasMore : after !== null && pageRows.length > 0;
+  const result = await keysetPage({ sort: NEWEST_FIRST, ...page, filters: eq(orders.visitorId, visitorId) }, (keyset) =>
+    db
+      .select({
+        id: orders.id,
+        status: orders.status,
+        totalCents: orders.totalCents,
+        createdAt: orders.createdAt,
+        itemCount: sql<number>`${itemCount}`,
+        titles: sql<string[]>`ARRAY${firstTitles}`,
+        cursorValue: keyset.cursorValue,
+      })
+      .from(orders)
+      .where(keyset.where)
+      .orderBy(...keyset.orderBy)
+      .limit(keyset.limit),
+  );
 
   return {
-    orders: pageRows.map((r) => ({
-      id: r.id,
-      status: r.status,
-      totalCents: r.totalCents,
-      createdAt: r.createdAt.toISOString(),
-      itemCount: r.itemCount,
-      titles: r.titles,
-    })),
-    nextCursor: hasNext && last ? encodeOrderCursor(last.cursorValue, last.id) : null,
-    prevCursor: hasPrev && first ? encodeOrderCursor(first.cursorValue, first.id) : null,
+    orders: result.rows.map((r) => ({ ...r, createdAt: r.createdAt.toISOString() })),
+    nextCursor: result.nextCursor,
+    prevCursor: result.prevCursor,
   };
 }
 
