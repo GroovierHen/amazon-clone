@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useActionState, useState, useTransition } from "react";
 import { removeFromCartAction, setCartQuantityAction } from "@/app/actions/cart";
-import { placeOrderAction, type CheckoutState, type ShippingField } from "@/app/actions/checkout";
+import { placeOrderAction, type CheckoutState } from "@/app/actions/checkout";
+import type { ShippingField } from "@/lib/checkout";
 import { summarize, type CartLine } from "@/lib/cart-lines";
 import { formatPrice } from "@/lib/format";
 

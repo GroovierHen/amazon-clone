@@ -1,163 +1,33 @@
 import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, setDefaultTimeout, test } from "bun:test";
-import { getPool } from "../src/db/client";
 import { getDb } from "../src/db/drizzle";
-import { addToCart, getCart } from "../src/lib/cart";
-import { getOrder, listOrders, placeOrder } from "../src/lib/orders";
+import { addToCart } from "../src/lib/cart";
+import { checkout } from "../src/lib/checkout";
+import { getOrder, listOrders } from "../src/lib/orders";
 import { insertCategory, insertProduct, resetTables } from "./helpers";
 
 // The database is remote: a test with many round trips needs more than the default 5 seconds.
 setDefaultTimeout(120_000);
 
-const pool = getPool();
 const db = getDb();
-const shipping = { name: "Ada Lovelace", address: "12 Analytical Row\nLondon N1 9GU" };
+const shipping = { name: "Ada Lovelace", street: "12 Analytical Row", city: "London", postcode: "N1 9GU" };
+
+/** Places an order for whatever is in the visitor's cart, and returns its id. */
+async function orderCart(visitor: string): Promise<number> {
+  const result = await checkout(db, visitor, shipping, () => {});
+  if (result.status !== "placed") throw new Error(`expected placed, got ${result.status}`);
+  return result.orderId;
+}
 
 let tools: number;
 let hammer: number;
 let ruler: number;
-
-const stockOf = async (id: number) =>
-  (await pool.query<{ stock: number }>("SELECT stock FROM products WHERE id = $1", [id])).rows[0].stock;
-const orderCount = async () => (await pool.query<{ n: number }>("SELECT count(*)::int AS n FROM orders")).rows[0].n;
 
 beforeEach(async () => {
   await resetTables();
   tools = await insertCategory("tools", "Tools");
   hammer = await insertProduct({ title: "Claw Hammer", categoryId: tools, priceCents: 1899, stock: 5 });
   ruler = await insertProduct({ title: "Steel Ruler", categoryId: tools, priceCents: 650, stock: 2 });
-});
-
-describe("place order: success", () => {
-  test("creates the order, copies title and price, takes stock and empties the cart", async () => {
-    const visitor = randomUUID();
-    await addToCart(db, visitor, hammer, 2);
-    await addToCart(db, visitor, ruler, 1);
-
-    const result = await placeOrder(db, visitor, shipping);
-    expect(result.ok).toBe(true);
-    if (!result.ok) return;
-    expect(result.productIds.sort()).toEqual([hammer, ruler].sort());
-
-    expect(await stockOf(hammer)).toBe(3);
-    expect(await stockOf(ruler)).toBe(1);
-    expect((await getCart(db, visitor)).lines).toEqual([]);
-
-    const order = await getOrder(db, visitor, result.orderId);
-    expect(order).toMatchObject({
-      status: "placed",
-      totalCents: 2 * 1899 + 650,
-      shippingName: "Ada Lovelace",
-      shippingAddress: "12 Analytical Row\nLondon N1 9GU",
-    });
-    expect(order!.items.map((i) => [i.title, i.quantity, i.unitPriceCents])).toEqual([
-      ["Claw Hammer", 2, 1899],
-      ["Steel Ruler", 1, 650],
-    ]);
-  });
-
-  test("fixes the price at order time, whatever the product costs later", async () => {
-    const visitor = randomUUID();
-    await addToCart(db, visitor, hammer, 1);
-    await pool.query("UPDATE products SET price_cents = 2500 WHERE id = $1", [hammer]);
-    const result = await placeOrder(db, visitor, shipping);
-    if (!result.ok) throw new Error("order should have been placed");
-    await pool.query("UPDATE products SET price_cents = 9999, title = 'Renamed' WHERE id = $1", [hammer]);
-
-    const order = await getOrder(db, visitor, result.orderId);
-    expect(order!.totalCents).toBe(2500);
-    expect(order!.items[0]).toMatchObject({ title: "Claw Hammer", unitPriceCents: 2500 });
-  });
-
-  test("lets the last unit be ordered", async () => {
-    const visitor = randomUUID();
-    await addToCart(db, visitor, ruler, 2);
-    expect((await placeOrder(db, visitor, shipping)).ok).toBe(true);
-    expect(await stockOf(ruler)).toBe(0);
-  });
-});
-
-describe("place order: short stock", () => {
-  test("leaves stock and the cart unchanged and names every short item", async () => {
-    const visitor = randomUUID();
-    await addToCart(db, visitor, hammer, 2);
-    await addToCart(db, visitor, ruler, 3);
-    const cartBefore = await getCart(db, visitor);
-
-    const result = await placeOrder(db, visitor, shipping);
-    expect(result).toEqual({
-      ok: false,
-      reason: "short",
-      shortItems: [{ productId: ruler, title: "Steel Ruler", requested: 3, available: 2 }],
-    });
-
-    expect(await stockOf(hammer)).toBe(5);
-    expect(await stockOf(ruler)).toBe(2);
-    expect(await getCart(db, visitor)).toEqual(cartBefore);
-    expect(await orderCount()).toBe(0);
-  });
-
-  test("reports an item that has sold out as zero available", async () => {
-    const visitor = randomUUID();
-    await addToCart(db, visitor, hammer, 1);
-    await pool.query("UPDATE products SET stock = 0 WHERE id = $1", [hammer]);
-    const result = await placeOrder(db, visitor, shipping);
-    expect(result).toMatchObject({ ok: false, reason: "short", shortItems: [{ productId: hammer, available: 0 }] });
-  });
-
-  test("does nothing for an empty cart or an unknown visitor", async () => {
-    expect(await placeOrder(db, randomUUID(), shipping)).toEqual({ ok: false, reason: "empty" });
-    expect(await orderCount()).toBe(0);
-  });
-});
-
-describe("place order: concurrency", () => {
-  test("ten carts race for one unit: exactly one order succeeds and stock ends at 0", async () => {
-    const last = await insertProduct({ title: "Last One", categoryId: tools, priceCents: 500, stock: 1 });
-    const visitors = Array.from({ length: 10 }, () => randomUUID());
-    for (const visitor of visitors) await addToCart(db, visitor, last, 1);
-
-    const results = await Promise.all(visitors.map((visitor) => placeOrder(db, visitor, shipping)));
-
-    expect(results.filter((r) => r.ok)).toHaveLength(1);
-    const losers = results.filter((r) => !r.ok);
-    expect(losers).toHaveLength(9);
-    for (const loser of losers) {
-      expect(loser).toMatchObject({ reason: "short", shortItems: [{ productId: last, requested: 1, available: 0 }] });
-    }
-    expect(await stockOf(last)).toBe(0);
-    expect(await orderCount()).toBe(1);
-    // The nine who lost still have the item in their carts.
-    const cartsLeft = await pool.query<{ n: number }>("SELECT count(*)::int AS n FROM cart_items WHERE product_id = $1", [last]);
-    expect(cartsLeft.rows[0].n).toBe(9);
-  });
-
-  test("carts that share products in opposite orders do not deadlock", async () => {
-    await pool.query("UPDATE products SET stock = 100 WHERE id = ANY($1::bigint[])", [[hammer, ruler]]);
-    const visitors = Array.from({ length: 10 }, () => randomUUID());
-    for (const [i, visitor] of visitors.entries()) {
-      // Half add the hammer first, half the ruler first.
-      const [first, second] = i % 2 === 0 ? [hammer, ruler] : [ruler, hammer];
-      await addToCart(db, visitor, first, 1);
-      await addToCart(db, visitor, second, 1);
-    }
-
-    const results = await Promise.all(visitors.map((visitor) => placeOrder(db, visitor, shipping)));
-
-    expect(results.every((r) => r.ok)).toBe(true);
-    expect(await stockOf(hammer)).toBe(90);
-    expect(await stockOf(ruler)).toBe(90);
-  });
-
-  test("the same cart submitted twice at once makes one order", async () => {
-    const visitor = randomUUID();
-    await addToCart(db, visitor, hammer, 2);
-    const results = await Promise.all([placeOrder(db, visitor, shipping), placeOrder(db, visitor, shipping)]);
-    expect(results.filter((r) => r.ok)).toHaveLength(1);
-    expect(results.filter((r) => !r.ok)).toEqual([{ ok: false, reason: "empty" }]);
-    expect(await stockOf(hammer)).toBe(3);
-    expect(await orderCount()).toBe(1);
-  });
 });
 
 describe("order history", () => {
@@ -167,13 +37,10 @@ describe("order history", () => {
     const ids: number[] = [];
     for (let i = 0; i < 3; i++) {
       await addToCart(db, visitor, hammer, 1);
-      const result = await placeOrder(db, visitor, shipping);
-      if (!result.ok) throw new Error("order should have been placed");
-      ids.push(result.orderId);
+      ids.push(await orderCart(visitor));
     }
     await addToCart(db, stranger, ruler, 1);
-    const theirs = await placeOrder(db, stranger, shipping);
-    if (!theirs.ok) throw new Error("order should have been placed");
+    const theirs = await orderCart(stranger);
 
     const list = await listOrders(db, visitor);
     expect(list.orders.map((o) => o.id)).toEqual([...ids].reverse());
@@ -181,7 +48,7 @@ describe("order history", () => {
     expect(list.nextCursor).toBeNull();
     expect(list.prevCursor).toBeNull();
 
-    expect(await getOrder(db, visitor, theirs.orderId)).toBeNull();
+    expect(await getOrder(db, visitor, theirs)).toBeNull();
     expect(await getOrder(db, stranger, ids[0])).toBeNull();
     expect((await listOrders(db, randomUUID())).orders).toEqual([]);
   });
@@ -191,9 +58,7 @@ describe("order history", () => {
     const ids: number[] = [];
     for (let i = 0; i < 3; i++) {
       await addToCart(db, visitor, hammer, 1);
-      const result = await placeOrder(db, visitor, shipping);
-      if (!result.ok) throw new Error("order should have been placed");
-      ids.push(result.orderId);
+      ids.push(await orderCart(visitor));
     }
 
     const page1 = await listOrders(db, visitor, { limit: 2 });

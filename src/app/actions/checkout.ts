@@ -1,12 +1,11 @@
 "use server";
 
-import { refresh, updateTag } from "next/cache";
+import { refresh } from "next/cache";
 import { redirect } from "next/navigation";
 import { getDb } from "@/db/drizzle";
-import { placeOrder } from "@/lib/orders";
+import { stockChanged } from "@/lib/catalog";
+import { checkout, SHIPPING_FIELDS, type ShippingField } from "@/lib/checkout";
 import { getVisitorId } from "@/lib/visitor";
-
-export type ShippingField = "name" | "street" | "city" | "postcode";
 
 export type CheckoutState = {
   status: "idle" | "invalid" | "short" | "empty" | "error";
@@ -15,49 +14,30 @@ export type CheckoutState = {
   values?: Partial<Record<ShippingField, string>>;
 };
 
-const LIMITS: Record<ShippingField, number> = { name: 100, street: 200, city: 100, postcode: 20 };
-const REQUIRED: Record<ShippingField, string> = {
-  name: "Enter the name of the person receiving the order.",
-  street: "Enter a street address.",
-  city: "Enter a town or city.",
-  postcode: "Enter a postcode.",
-};
-
 export async function placeOrderAction(_previous: CheckoutState, formData: FormData): Promise<CheckoutState> {
-  const values = {} as Record<ShippingField, string>;
-  const errors: Partial<Record<ShippingField, string>> = {};
-  for (const field of Object.keys(LIMITS) as ShippingField[]) {
-    const raw = formData.get(field);
-    values[field] = typeof raw === "string" ? raw.trim().replace(/\s+/g, " ") : "";
-    if (!values[field]) errors[field] = REQUIRED[field];
-    else if (values[field].length > LIMITS[field]) errors[field] = `Use ${LIMITS[field]} characters or fewer.`;
-  }
-  if (Object.keys(errors).length > 0) return { status: "invalid", errors, values };
-
+  const fields = Object.fromEntries(formData);
   const visitorId = await getVisitorId();
-  if (!visitorId) return { status: "empty", values };
-
   let result;
   try {
-    result = await placeOrder(getDb(), visitorId, {
-      name: values.name,
-      address: `${values.street}\n${values.city} ${values.postcode}`,
-    });
+    result = await checkout(getDb(), visitorId, fields, stockChanged);
   } catch (error) {
-    console.error("placeOrder failed", error);
-    return { status: "error", values };
+    console.error("checkout failed", error);
+    return { status: "error", values: asTyped(fields) };
   }
 
-  if (!result.ok) {
-    if (result.reason === "short") {
-      // The pages for these products are showing more stock than there is.
-      for (const item of result.shortItems) updateTag(`product:${item.productId}`);
-    }
-    refresh();
-    return { status: result.reason, values };
-  }
+  if (result.status === "placed") redirect(`/orders/${result.orderId}?placed=1`);
+  if (result.status === "invalid") return { status: "invalid", errors: result.errors, values: result.values };
+  // The page reads the cart again, with stock as it is now, and names the short items itself.
+  refresh();
+  return { status: result.status, values: result.values };
+}
 
-  // After the commit, every product in the order has less stock than its cached pages say.
-  for (const productId of result.productIds) updateTag(`product:${productId}`);
-  redirect(`/orders/${result.orderId}?placed=1`);
+/** The shipping fields as typed: checkout threw, so it sent no cleaned ones back. */
+function asTyped(fields: Record<string, unknown>): CheckoutState["values"] {
+  const values: CheckoutState["values"] = {};
+  for (const field of SHIPPING_FIELDS) {
+    const value = fields[field];
+    if (typeof value === "string") values[field] = value;
+  }
+  return values;
 }

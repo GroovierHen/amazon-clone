@@ -1,4 +1,4 @@
-import { cacheLife, cacheTag } from "next/cache";
+import { cacheLife, cacheTag, updateTag } from "next/cache";
 import { getDb } from "@/db/drizzle";
 import {
   findProductBySlug,
@@ -23,7 +23,7 @@ export async function getProductList(params: ListParams): Promise<ListResult> {
   "use cache";
   cacheLife("minutes");
   const result = await listProducts(getDb(), params);
-  cacheTag("products", ...result.items.map((item) => `product:${item.id}`));
+  cacheTag("products", ...result.items.map((item) => productTag(item.id)));
   return result;
 }
 
@@ -44,7 +44,7 @@ export async function getProductContent(slug: string): Promise<ProductContent | 
   "use cache";
   cacheLife("days");
   const product = await findProductBySlug(getDb(), slug);
-  cacheTag(product ? `product:${product.id}` : "products");
+  cacheTag(product ? productTag(product.id) : "products");
   return product;
 }
 
@@ -52,7 +52,7 @@ export async function getProductContent(slug: string): Promise<ProductContent | 
 export async function getProductOffer(id: number): Promise<ProductOffer | null> {
   "use cache";
   cacheLife("minutes");
-  cacheTag(`product:${id}`);
+  cacheTag(productTag(id));
   return findProductOffer(getDb(), id);
 }
 
@@ -61,4 +61,18 @@ export async function getProductSlugs(): Promise<string[]> {
   cacheLife("days");
   cacheTag("products");
   return listProductSlugs(getDb());
+}
+
+/** The tag on every cached read that shows this product. */
+function productTag(id: number): string {
+  return `product:${id}`;
+}
+
+/**
+ * These products' stock changed, or their cached pages show stock there is
+ * not: the next request reads them fresh. Call it only from a Server Action,
+ * the one place `updateTag` works.
+ */
+export function stockChanged(productIds: number[]): void {
+  for (const id of productIds) updateTag(productTag(id));
 }
